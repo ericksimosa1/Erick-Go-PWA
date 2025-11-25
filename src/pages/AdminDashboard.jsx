@@ -5,7 +5,7 @@ import {
     TableContainer, TableHead, TableRow, Paper, Dialog, DialogTitle,
     DialogContent, DialogActions, TextField, IconButton, Alert, FormControl, InputLabel, Select, MenuItem, Checkbox, ListItem, ListItemText, List, DialogContentText, Divider, CircularProgress, Card, CardContent, CardActions, Grid, Accordion, AccordionSummary, AccordionDetails, Chip
 } from '@mui/material';
-import { Edit, Delete, Add as AddIcon, CleaningServices as CleaningServicesIcon, Build as BuildIcon, Warning as WarningIcon, Settings as SettingsIcon, AccessTime as AccessTimeIcon, ExpandMore as ExpandMoreIcon, People as PeopleIcon, Group as GroupIcon, Schedule as ScheduleIcon, PersonOff as PersonOffIcon, Send as SendIcon } from '@mui/icons-material';
+import { Edit, Delete, Add as AddIcon, CleaningServices as CleaningServicesIcon, Build as BuildIcon, Warning as WarningIcon, Settings as SettingsIcon, AccessTime as AccessTimeIcon, ExpandMore as ExpandMoreIcon, People as PeopleIcon, Group as GroupIcon, Schedule as ScheduleIcon, PersonOff as PersonOffIcon, Send as SendIcon, CalendarToday as CalendarTodayIcon } from '@mui/icons-material';
 import { useFirestore } from '../hooks/useFirestore';
 import { useAuthStore } from '../store/authStore';
 import RegisterUserModal from '../components/RegisterUserModal';
@@ -40,7 +40,13 @@ export default function AdminDashboard() {
         setClosingPerson, getTodayClosingPerson,
         getTodayClosingTime,
         fetchTodayAsistencias,
-        deleteEmployeeAttendanceForToday
+        deleteEmployeeAttendanceForToday,
+        // Nuevas funciones para configuración semanal
+        fetchWeeklyClosingConfig,
+        updateWeeklyClosingConfig,
+        getTodayClosingPersonFromWeeklyConfig,
+        convertTo12HourFormat,
+        convertTo24HourFormat
     } = useFirestore();
 
     const [users, setUsers] = useState([]);
@@ -81,6 +87,19 @@ export default function AdminDashboard() {
     const [selectedTargetUser, setSelectedTargetUser] = useState('');
     const [isSendingNotification, setIsSendingNotification] = useState(false);
     const [notificationSuccess, setNotificationSuccess] = useState('');
+
+    // --- ESTADOS PARA CONFIGURACIÓN SEMANAL DE CIERRE ---
+    const [weeklyClosingConfigDialog, setWeeklyClosingConfigDialog] = useState({ open: false });
+    const [weeklyClosingConfig, setWeeklyClosingConfig] = useState({
+        lunes: { vinculoId: null, userId: null, userName: null },
+        martes: { vinculoId: null, userId: null, userName: null },
+        miercoles: { vinculoId: null, userId: null, userName: null },
+        jueves: { vinculoId: null, userId: null, userName: null },
+        viernes: { vinculoId: null, userId: null, userName: null },
+        sabado: { vinculoId: null, userId: null, userName: null },
+        domingo: { vinculoId: null, userId: null, userName: null }
+    });
+    const [weeklyConfigLoading, setWeeklyConfigLoading] = useState(false);
 
     const [isAppReady, setIsAppReady] = useState(false);
 
@@ -131,21 +150,32 @@ export default function AdminDashboard() {
                 if (selectedClientId) {
                     const usersData = await fetchUsersByClient(selectedClientId);
                     const zonesData = await fetchZones(selectedClientId);
-                    const closingPerson = await getTodayClosingPerson(selectedClientId);
+                    const closingPerson = await getTodayClosingPersonFromWeeklyConfig(selectedClientId);
                     const todayClosingTime = await getTodayClosingTime(selectedClientId);
                     const asistenciaData = await fetchTodayAsistencias(selectedClientId);
+                    const weeklyConfig = await fetchWeeklyClosingConfig(selectedClientId);
 
                     setUsers(sortUsersByRole(usersData));
                     setZones(zonesData);
                     setTodayClosingPerson(closingPerson);
                     setClosingTime(todayClosingTime);
                     setTodayAsistencias(asistenciaData);
+                    setWeeklyClosingConfig(weeklyConfig);
                 } else {
                     setUsers([]);
-                    setZones([]);
+                    setZonas([]);
                     setTodayClosingPerson(null);
                     setClosingTime(null);
                     setTodayAsistencias([]);
+                    setWeeklyClosingConfig({
+                        lunes: { vinculoId: null, userId: null, userName: null },
+                        martes: { vinculoId: null, userId: null, userName: null },
+                        miercoles: { vinculoId: null, userId: null, userName: null },
+                        jueves: { vinculoId: null, userId: null, userName: null },
+                        viernes: { vinculoId: null, userId: null, userName: null },
+                        sabado: { vinculoId: null, userId: null, userName: null },
+                        domingo: { vinculoId: null, userId: null, userName: null }
+                    });
                 }
             } catch (error) {
                 console.error("AdminDashboard: Error al cargar los datos iniciales:", error);
@@ -154,7 +184,7 @@ export default function AdminDashboard() {
             }
         };
         fetchData();
-    }, [isAppReady, selectedClientId, fetchUsersByClient, fetchZones, getTodayClosingPerson, getTodayClosingTime, fetchTodayAsistencias]);
+    }, [isAppReady, selectedClientId, fetchUsersByClient, fetchZones, getTodayClosingPersonFromWeeklyConfig, getTodayClosingTime, fetchTodayAsistencias, fetchWeeklyClosingConfig]);
 
     // Resetear tabValue cuando cambia selectedClientId
     useEffect(() => {
@@ -719,6 +749,62 @@ export default function AdminDashboard() {
         return employee ? employee.userData.nombre : 'Empleado desconocido';
     };
 
+    // --- FUNCIONES PARA CONFIGURACIÓN SEMANAL DE CIERRE ---
+    const handleOpenWeeklyClosingConfigDialog = () => {
+        setWeeklyClosingConfigDialog({ open: true });
+    };
+
+    const handleCloseWeeklyClosingConfigDialog = () => {
+        setWeeklyClosingConfigDialog({ open: false });
+    };
+
+    const handleWeeklyConfigChange = (day, vinculoId) => {
+        if (!vinculoId) {
+            // Si no se selecciona un empleado, limpiar la configuración para ese día
+            setWeeklyClosingConfig(prev => ({
+                ...prev,
+                [day]: { vinculoId: null, userId: null, userName: null }
+            }));
+            return;
+        }
+
+        const selectedUser = users.find(u => u.vinculoId === vinculoId);
+        if (selectedUser) {
+            setWeeklyClosingConfig(prev => ({
+                ...prev,
+                [day]: {
+                    vinculoId: vinculoId,
+                    userId: selectedUser.userId,
+                    userName: selectedUser.userData.nombre
+                }
+            }));
+        }
+    };
+
+    const handleSaveWeeklyClosingConfig = async () => {
+        setWeeklyConfigLoading(true);
+        try {
+            const success = await updateWeeklyClosingConfig(selectedClientId, weeklyClosingConfig);
+            
+            if (success) {
+                alert("Configuración semanal de cierre guardada correctamente.");
+                
+                // Actualizar el encargado de cierre para hoy
+                const todayClosingPerson = await getTodayClosingPersonFromWeeklyConfig(selectedClientId);
+                setTodayClosingPerson(todayClosingPerson);
+                
+                handleCloseWeeklyClosingConfigDialog();
+            } else {
+                alert("Error al guardar la configuración semanal de cierre. Por favor, inténtalo de nuevo.");
+            }
+        } catch (error) {
+            console.error("Error al guardar configuración semanal de cierre:", error);
+            alert("Error al guardar la configuración semanal de cierre. Por favor, inténtalo de nuevo.");
+        } finally {
+            setWeeklyConfigLoading(false);
+        }
+    };
+
     return (
         <Box sx={{ 
             width: '100vw', 
@@ -1013,7 +1099,7 @@ export default function AdminDashboard() {
                             <Card sx={{ mb: 3, backgroundColor: '#f5f5f5' }}>
                                 <CardContent>
                                     <Typography variant="h6">Hora de cierre hoy:</Typography>
-                                    <Typography variant="body1">{closingTime}</Typography>
+                                    <Typography variant="body1">{convertTo12HourFormat(closingTime)}</Typography>
                                 </CardContent>
                             </Card>
                         ) : (
@@ -1027,9 +1113,19 @@ export default function AdminDashboard() {
                             color="primary" 
                             startIcon={<AccessTimeIcon />}
                             onClick={handleOpenClosingPersonDialog}
+                            sx={{ mb: 2, mr: 2 }}
+                        >
+                            Configurar Encargado de Cierre Diario
+                        </Button>
+                        
+                        <Button 
+                            variant="contained" 
+                            color="secondary" 
+                            startIcon={<CalendarTodayIcon />}
+                            onClick={handleOpenWeeklyClosingConfigDialog}
                             sx={{ mb: 2 }}
                         >
-                            Configurar Encargado de Cierre
+                            Configurar Encargados de Cierre Semanal
                         </Button>
                         
                         <Box sx={{ width: '100%', overflowX: 'auto' }}>
@@ -1085,7 +1181,7 @@ export default function AdminDashboard() {
                                 <CardContent>
                                     <Typography variant="h6">
                                         <ScheduleIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
-                                        Hora de cierre hoy: {closingTime}
+                                        Hora de cierre hoy: {convertTo12HourFormat(closingTime)}
                                     </Typography>
                                 </CardContent>
                             </Card>
@@ -1345,6 +1441,75 @@ export default function AdminDashboard() {
                     </Button>
                     <Button onClick={handleSetClosingPerson} variant="contained" disabled={closingPersonLoading}>
                         {closingPersonLoading ? 'Guardando...' : 'Guardar'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* --- NUEVO DIÁLOGO PARA CONFIGURACIÓN SEMANAL DE CIERRE --- */}
+            <Dialog open={weeklyClosingConfigDialog.open} onClose={handleCloseWeeklyClosingConfigDialog} maxWidth="lg" fullWidth>
+                <DialogTitle>
+                    <CalendarTodayIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+                    Configurar Encargados de Cierre Semanal
+                </DialogTitle>
+                <DialogContent>
+                    <Box sx={{ mt: 2 }}>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                            Configura los encargados de cierre para cada día de la semana. Esta configuración se mantendrá hasta que la modifiques.
+                        </Typography>
+                        
+                        <Grid container spacing={2}>
+                            {[
+                                { key: 'lunes', label: 'Lunes' },
+                                { key: 'martes', label: 'Martes' },
+                                { key: 'miercoles', label: 'Miércoles' },
+                                { key: 'jueves', label: 'Jueves' },
+                                { key: 'viernes', label: 'Viernes' },
+                                { key: 'sabado', label: 'Sábado' },
+                                { key: 'domingo', label: 'Domingo' }
+                            ].map((day) => (
+                                <Grid item xs={12} sm={6} md={4} key={day.key}>
+                                    <Card sx={{ mb: 2 }}>
+                                        <CardContent>
+                                            <Typography variant="subtitle1" gutterBottom>
+                                                {day.label}
+                                            </Typography>
+                                            <FormControl fullWidth margin="dense">
+                                                <InputLabel id={`${day.key}-person-select-label`}>Encargado</InputLabel>
+                                                <Select
+                                                    labelId={`${day.key}-person-select-label`}
+                                                    id={`${day.key}-person-select`}
+                                                    value={weeklyClosingConfig[day.key]?.vinculoId || ''}
+                                                    label="Encargado"
+                                                    onChange={(e) => handleWeeklyConfigChange(day.key, e.target.value)}
+                                                >
+                                                    <MenuItem value="">
+                                                        <em>Sin encargado</em>
+                                                    </MenuItem>
+                                                    {users.filter(u => u.userData.rol === 'empleado').map((u) => (
+                                                        <MenuItem key={u.vinculoId} value={u.vinculoId}>
+                                                            {u.userData.nombre || 'Sin nombre'}
+                                                        </MenuItem>
+                                                    ))}
+                                                </Select>
+                                            </FormControl>
+                                            {weeklyClosingConfig[day.key]?.userName && (
+                                                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                                                    Actual: {weeklyClosingConfig[day.key].userName}
+                                                </Typography>
+                                            )}
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                            ))}
+                        </Grid>
+                    </Box>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={handleCloseWeeklyClosingConfigDialog} disabled={weeklyConfigLoading}>
+                        Cancelar
+                    </Button>
+                    <Button onClick={handleSaveWeeklyClosingConfig} variant="contained" disabled={weeklyConfigLoading}>
+                        {weeklyConfigLoading ? 'Guardando...' : 'Guardar Configuración'}
                     </Button>
                 </DialogActions>
             </Dialog>

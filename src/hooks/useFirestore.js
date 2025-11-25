@@ -791,6 +791,143 @@ export const useFirestore = () => {
     }, []);
 
     // ====================================================================
+    // NUEVAS FUNCIONES PARA CONFIGURACIÓN SEMANAL DE CIERRE
+    // ====================================================================
+    
+    // Obtener la configuración semanal de encargados de cierre
+    const fetchWeeklyClosingConfig = useCallback(async (clientId) => {
+        try {
+            const configRef = doc(db, 'clientes', clientId, 'configuracion', 'cierreSemanal');
+            const configSnap = await getDoc(configRef);
+            
+            if (configSnap.exists()) {
+                return configSnap.data();
+            }
+            
+            // Si no existe configuración, devolver configuración por defecto
+            const defaultConfig = {
+                lunes: { vinculoId: null, userId: null, userName: null },
+                martes: { vinculoId: null, userId: null, userName: null },
+                miercoles: { vinculoId: null, userId: null, userName: null },
+                jueves: { vinculoId: null, userId: null, userName: null },
+                viernes: { vinculoId: null, userId: null, userName: null },
+                sabado: { vinculoId: null, userId: null, userName: null },
+                domingo: { vinculoId: null, userId: null, userName: null },
+                ultimaActualizacion: Timestamp.now()
+            };
+            
+            // Crear la configuración por defecto
+            await setDoc(configRef, defaultConfig);
+            return defaultConfig;
+        } catch (error) {
+            console.error("Error al obtener configuración semanal de cierre:", error);
+            return null;
+        }
+    }, []);
+
+    // Actualizar la configuración semanal de encargados de cierre
+    const updateWeeklyClosingConfig = useCallback(async (clientId, weeklyConfig) => {
+        try {
+            const configRef = doc(db, 'clientes', clientId, 'configuracion', 'cierreSemanal');
+            const updatedConfig = {
+                ...weeklyConfig,
+                ultimaActualizacion: Timestamp.now()
+            };
+            
+            await setDoc(configRef, updatedConfig);
+            return true;
+        } catch (error) {
+            console.error("Error al actualizar configuración semanal de cierre:", error);
+            return false;
+        }
+    }, []);
+
+    // Obtener el encargado de cierre para el día actual según la configuración semanal
+    const getTodayClosingPersonFromWeeklyConfig = useCallback(async (clientId) => {
+        try {
+            const weeklyConfig = await fetchWeeklyClosingConfig(clientId);
+            if (!weeklyConfig) return null;
+            
+            // Obtener el día de la semana actual (0 = domingo, 1 = lunes, etc.)
+            const today = new Date();
+            const dayOfWeek = today.getDay();
+            
+            // Mapear el número del día al nombre en español
+            const dayNames = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+            const todayName = dayNames[dayOfWeek];
+            
+            // Obtener la configuración para el día actual
+            const todayConfig = weeklyConfig[todayName];
+            
+            if (todayConfig && todayConfig.userId) {
+                return {
+                    userId: todayConfig.userId,
+                    nombre: todayConfig.userName,
+                    vinculoId: todayConfig.vinculoId
+                };
+            }
+            
+            return null;
+        } catch (error) {
+            console.error("Error al obtener encargado de cierre del día:", error);
+            return null;
+        }
+    }, [fetchWeeklyClosingConfig]);
+
+    // Función para convertir hora de 24h a 12h con AM/PM
+    const convertTo12HourFormat = useCallback((time24) => {
+        if (!time24) return '';
+        
+        // Separar horas y minutos
+        const [hours, minutes] = time24.split(':');
+        
+        // Convertir a número
+        let hoursNum = parseInt(hours, 10);
+        const minutesNum = parseInt(minutes, 10);
+        
+        // Determinar AM o PM
+        const period = hoursNum >= 12 ? 'PM' : 'AM';
+        
+        // Convertir a formato 12h
+        hoursNum = hoursNum % 12 || 12;
+        
+        // Formatear con ceros a la izquierda
+        const formattedHours = hoursNum.toString().padStart(2, '0');
+        const formattedMinutes = minutesNum.toString().padStart(2, '0');
+        
+        return `${formattedHours}:${formattedMinutes} ${period}`;
+    }, []);
+
+    // Función para convertir hora de 12h a 24h
+    const convertTo24HourFormat = useCallback((time12) => {
+        if (!time12) return '';
+        
+        // Separar hora, minutos y período (AM/PM)
+        const timeParts = time12.trim().split(' ');
+        if (timeParts.length !== 2) return time12; // Devolver original si no tiene formato esperado
+        
+        const [time, period] = timeParts;
+        const [hours, minutes] = time.split(':');
+        
+        // Convertir a número
+        let hoursNum = parseInt(hours, 10);
+        const minutesNum = parseInt(minutes, 10);
+        
+        // Convertir a formato 24h
+        if (period.toUpperCase() === 'PM' && hoursNum < 12) {
+            hoursNum += 12;
+        } else if (period.toUpperCase() === 'AM' && hoursNum === 12) {
+            hoursNum = 0;
+        }
+        
+        // Formatear con ceros a la izquierda
+        const formattedHours = hoursNum.toString().padStart(2, '0');
+        const formattedMinutes = minutesNum.toString().padStart(2, '0');
+        
+        return `${formattedHours}:${formattedMinutes}`;
+    }, []);
+
+    // ====================================================================
     // CORRECCIÓN: NUEVAS FUNCIONES PARA SINCRONIZACIÓN DE CIERRES EN TIEMPO REAL
     // ====================================================================
     
@@ -1131,7 +1268,15 @@ export const useFirestore = () => {
         // ====================================================================
         // NUEVA FUNCIÓN PARA NOTIFICACIONES
         // ====================================================================
-        fetchDriversByZone
+        fetchDriversByZone,
+        // ====================================================================
+        // NUEVAS FUNCIONES PARA CONFIGURACIÓN SEMANAL DE CIERRE
+        // ====================================================================
+        fetchWeeklyClosingConfig,
+        updateWeeklyClosingConfig,
+        getTodayClosingPersonFromWeeklyConfig,
+        convertTo12HourFormat,
+        convertTo24HourFormat
     };
 };
 
