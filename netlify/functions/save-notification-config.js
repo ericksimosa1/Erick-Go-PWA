@@ -1,4 +1,4 @@
-// netlify/functions/save-subscription.js
+// netlify/functions/save-notification-config.js
 
 const admin = require('firebase-admin');
 
@@ -20,7 +20,7 @@ if (!admin.apps.length) {
 }
 
 exports.handler = async function (event, context) {
-  console.log('=== INICIO save-subscription (versión mejorada) ===');
+  console.log('=== INICIO save-notification-config ===');
   
   if (event.httpMethod !== 'POST') {
     return {
@@ -30,40 +30,37 @@ exports.handler = async function (event, context) {
   }
 
   try {
-    const { userId, subscription, clientId } = JSON.parse(event.body);
+    const { clientId, config } = JSON.parse(event.body);
 
-    if (!userId || !subscription) {
-      console.log('Error: Faltan userId o subscription');
+    if (!clientId || !config) {
+      console.log('Error: Faltan clientId o config');
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'Faltan userId o subscription' }),
+        body: JSON.stringify({ error: 'Faltan clientId o config' }),
       };
     }
 
     const db = admin.firestore();
     
-    // CAMBIO CLAVE: Ahora guardamos el clientId para asegurar que las notificaciones
-    // se envíen a los usuarios correctos dentro de su empresa.
-    await db.collection('suscripciones').doc(userId).set({
-      userId: userId,
-      clientId: clientId || null, 
-      subscription: subscription,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
+    // Guardar la configuración en una subcolección específica del cliente
+    await db.collection('clientes').doc(clientId)
+      .collection('configuracion').doc('notificaciones')
+      .set({
+        ...config,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
 
-    console.log(`Suscripción guardada para usuario: ${userId}, cliente: ${clientId}`);
+    console.log(`Configuración de notificaciones guardada para cliente: ${clientId}`);
 
     return {
       statusCode: 200,
       body: JSON.stringify({ 
-        message: 'Suscripción guardada con éxito',
-        userId: userId,
+        message: 'Configuración de notificaciones guardada con éxito',
         clientId: clientId
       }),
     };
   } catch (error) {
-    console.error('Error al guardar la suscripción:', error);
+    console.error('Error al guardar la configuración de notificaciones:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: 'Error interno del servidor', details: error.message }),

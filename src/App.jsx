@@ -30,14 +30,15 @@ const erickGoTheme = createTheme({
 // Componente principal que maneja la lógica de la aplicación
 function AppContent() {
     const location = useLocation();
-    const { user } = useAuthStore();
+    const { user, selectedClientId } = useAuthStore();
     const [isAppReady, setIsAppReady] = useState(false);
     
     // --- ESTADOS PARA NOTIFICACIONES ---
-    const [subscription, setSubscription] = useState(null); // Guardamos la suscripción del usuario
+    const [subscription, setSubscription] = useState(null);
     const [notificationPermissionStatus, setNotificationPermissionStatus] = useState('');
     const [showPermissionSnackbar, setShowPermissionSnackbar] = useState(false);
-    const [testMessage, setTestMessage] = useState(''); // Mensaje para la notificación de prueba
+    const [testMessage, setTestMessage] = useState('');
+    const [subscriptionError, setSubscriptionError] = useState('');
 
     // --- FUNCIÓN PARA ACTUALIZAR EL ESTADO DEL RECORDATORIO ---
     const updateReminderStatus = async (action) => {
@@ -75,10 +76,10 @@ function AppContent() {
 
     // --- EFECTO PARA SUSCRIBIR AL USUARIO A LAS NOTIFICACIONES PUSH ---
     useEffect(() => {
-        if (user) {
+        if (user && selectedClientId) {
             subscribeUserToPush();
         }
-    }, [user]);
+    }, [user, selectedClientId]);
 
     // --- EFECTO PARA ESCUCHAR MENSAJES DEL SERVICE WORKER ---
     useEffect(() => {
@@ -103,65 +104,97 @@ function AppContent() {
         return () => navigator.serviceWorker.removeEventListener('message', handleMessage);
     }, [user]);
 
-    // --- FUNCIÓN PARA SUSCRIBIR AL USUARIO (VERSIÓN CORREGIDA) ---
+    // --- FUNCIÓN PARA SUSCRIBIR AL USUARIO (VERSIÓN MEJORADA) ---
     const subscribeUserToPush = async () => {
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
             console.warn('Las notificaciones push no son compatibles con este navegador.');
+            setSubscriptionError('Tu navegador no es compatible con notificaciones push.');
             return;
         }
 
         try {
             const registration = await navigator.serviceWorker.ready;
             let permission = Notification.permission;
+            
             if (permission === 'default') {
-                permission = await Notification.requestPermission();
-                setNotificationPermissionStatus(permission);
                 setShowPermissionSnackbar(true);
-            }
-
-            if (permission === 'granted') {
-                let subscription = await registration.pushManager.getSubscription();
-                if (!subscription) {
-                    // ¡IMPORTANTE! Asegúrate de que esta sea tu CLAVE PÚBLICA VAPID
-                    const publicVapidKey = 'BL5HL7-NzkovXAWOzhIpDiqBmzBw-x5zOpEnrIqbIkKEGEPf8FOs87_oUcidqrU98-81J2nHXRDQufR6sfyxF2g';
-                    subscription = await registration.pushManager.subscribe({
-                        userVisibleOnly: true,
-                        applicationServerKey: urlB64ToUint8Array(publicVapidKey),
-                    });
-                }
-                setSubscription(subscription); // Guardamos la suscripción en el estado
-                await saveSubscriptionToBackend(subscription);
-                console.log('Usuario suscrito a notificaciones push.');
+                
+                setTimeout(async () => {
+                    try {
+                        permission = await Notification.requestPermission();
+                        setNotificationPermissionStatus(permission);
+                        
+                        if (permission !== 'granted') {
+                            setSubscriptionError('Has denegado el permiso para recibir notificaciones. Puedes cambiarlo en la configuración de tu navegador.');
+                            setShowPermissionSnackbar(false);
+                            return;
+                        }
+                        
+                        await processSubscription(registration);
+                    } catch (error) {
+                        console.error('Error al solicitar permiso de notificación:', error);
+                        setSubscriptionError('Error al solicitar permiso de notificación. Inténtalo de nuevo.');
+                        setShowPermissionSnackbar(false);
+                    }
+                }, 1000);
+            } else if (permission === 'granted') {
+                await processSubscription(registration);
             } else {
-                console.log('El usuario no ha concedido permiso para las notificaciones.');
+                setSubscriptionError('Has denegado previamente el permiso para recibir notificaciones. Puedes cambiarlo en la configuración de tu navegador.');
             }
         } catch (error) {
-            // --- ESTE ES EL CAMBIO CLAVE ---
-            // Manejamos el error de forma específica y elegante.
+            console.error('Error al suscribir al usuario a notificaciones push:', error);
+            
             if (error.name === 'AbortError' && error.message.includes('push service error')) {
-                // Es un error de bloqueo (como en Brave). Lo registramos como una advertencia simple.
-                console.warn('No se pudo suscribir al usuario a las notificaciones push. El navegador podría estar bloqueando el servicio de push.');
+                setSubscriptionError('No se pudo suscribir a las notificaciones. El navegador podría estar bloqueando el servicio de push.');
             } else {
-                // Es cualquier otro error inesperado. Lo registramos como un error grave.
-                console.error('Error inesperado al suscribir al usuario:', error);
+                setSubscriptionError('Error inesperado al suscribir a las notificaciones. Inténtalo de nuevo.');
             }
+        }
+    };
+
+    // --- FUNCIÓN AUXILIAR PARA PROCESAR LA SUSCRIPCIÓN ---
+    const processSubscription = async (registration) => {
+        try {
+            let subscription = await registration.pushManager.getSubscription();
+            
+            if (!subscription) {
+                const publicVapidKey = 'BL5HL7-NzkovXAWOzhIpDiqBmzBw-x5zOpEnrIqbIkKEGEPf8FOs87_oUcidqrU98-81J2nHXRDQufR6sfyxF2g';
+                subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlB64ToUint8Array(publicVapidKey),
+                });
+            }
+            
+            setSubscription(subscription);
+            await saveSubscriptionToBackend(subscription);
+            console.log('Usuario suscrito a notificaciones push.');
+            setSubscriptionError('');
+        } catch (error) {
+            console.error('Error al procesar la suscripción:', error);
+            setSubscriptionError('Error al procesar la suscripción. Inténtalo de nuevo.');
         }
     };
 
     // --- FUNCIÓN PARA GUARDAR LA SUSCRIPCIÓN EN NETLIFY ---
     const saveSubscriptionToBackend = async (subscription) => {
-        if (!user?.uid) return;
+        if (!user?.uid || !selectedClientId) return;
         try {
             const response = await fetch('/.netlify/functions/save-subscription', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ subscription: subscription, userId: user.uid }),
+                body: JSON.stringify({ 
+                    subscription: subscription, 
+                    userId: user.uid,
+                    clientId: selectedClientId
+                }),
             });
             if (!response.ok) throw new Error('Error al guardar la suscripción en el backend.');
             const data = await response.json();
             console.log('Suscripción guardada en el backend:', data);
         } catch (error) {
             console.error('Error en saveSubscriptionToBackend:', error);
+            setSubscriptionError('Error al guardar la suscripción en el servidor. Inténtalo de nuevo.');
         }
     };
     
@@ -181,7 +214,11 @@ function AppContent() {
             const response = await fetch('/.netlify/functions/send-notification', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ subscription, payload }),
+                body: JSON.stringify({ 
+                    userIds: [user.uid], 
+                    payload: JSON.parse(payload),
+                    clientId: selectedClientId
+                }),
             });
 
             if (!response.ok) throw new Error('Error al enviar la notificación.');
@@ -226,7 +263,6 @@ function AppContent() {
             </Routes>
 
             {/* --- BOTÓN DE PRUEBA Y SNACKBARS --- */}
-            {/* Mostramos un botón de prueba solo si el usuario está suscrito */}
             {subscription && (
                 <Box sx={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999 }}>
                     <Button variant="contained" color="secondary" onClick={sendTestNotification}>
@@ -235,19 +271,55 @@ function AppContent() {
                 </Box>
             )}
 
-            {/* Snackbar para el estado del permiso de notificación */}
-            <Snackbar open={showPermissionSnackbar} autoHideDuration={6000} onClose={() => setShowPermissionSnackbar(false)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-                <Alert onClose={() => setShowPermissionSnackbar(false)} severity={notificationPermissionStatus === 'granted' ? 'success' : 'warning'} sx={{ width: '100%' }}>
-                    {notificationPermissionStatus === 'granted' ? '¡Notificaciones activadas!' : 'Las notificaciones están desactivadas.'}
+            <Snackbar 
+                open={showPermissionSnackbar} 
+                autoHideDuration={6000} 
+                onClose={() => setShowPermissionSnackbar(false)} 
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+                <Alert onClose={() => setShowPermissionSnackbar(false)} severity="info" sx={{ width: '100%' }}>
+                    Vamos a solicitar permiso para enviarte notificaciones importantes sobre tus viajes.
                 </Alert>
             </Snackbar>
 
-            {/* Snackbar para el resultado de la notificación de prueba */}
-            <Snackbar open={!!testMessage} autoHideDuration={4000} onClose={() => setTestMessage('')} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
-                <Alert onClose={() => setTestMessage('')} severity="info" sx={{ width: '100%' }}>
-                    {testMessage}
-                </Alert>
-            </Snackbar>
+            {notificationPermissionStatus && (
+                <Snackbar 
+                    open={true} 
+                    autoHideDuration={6000} 
+                    onClose={() => setNotificationPermissionStatus('')} 
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                >
+                    <Alert onClose={() => setNotificationPermissionStatus('')} severity={notificationPermissionStatus === 'granted' ? 'success' : 'warning'} sx={{ width: '100%' }}>
+                        {notificationPermissionStatus === 'granted' ? '¡Notificaciones activadas!' : 'Las notificaciones están desactivadas.'}
+                    </Alert>
+                </Snackbar>
+            )}
+
+            {subscriptionError && (
+                <Snackbar 
+                    open={true} 
+                    autoHideDuration={8000} 
+                    onClose={() => setSubscriptionError('')} 
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                >
+                    <Alert onClose={() => setSubscriptionError('')} severity="error" sx={{ width: '100%' }}>
+                        {subscriptionError}
+                    </Alert>
+                </Snackbar>
+            )}
+
+            {testMessage && (
+                <Snackbar 
+                    open={!!testMessage} 
+                    autoHideDuration={4000} 
+                    onClose={() => setTestMessage('')} 
+                    anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+                >
+                    <Alert onClose={() => setTestMessage('')} severity="info" sx={{ width: '100%' }}>
+                        {testMessage}
+                    </Alert>
+                </Snackbar>
+            )}
         </>
     );
 }

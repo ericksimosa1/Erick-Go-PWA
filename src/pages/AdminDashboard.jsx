@@ -5,10 +5,13 @@ import {
     TableContainer, TableHead, TableRow, Paper, Dialog, DialogTitle,
     DialogContent, DialogActions, TextField, IconButton, Alert, FormControl, InputLabel, Select, MenuItem, Checkbox, ListItem, ListItemText, List, DialogContentText, Divider, CircularProgress, Card, CardContent, CardActions, Grid, Accordion, AccordionSummary, AccordionDetails, Chip
 } from '@mui/material';
-import { Edit, Delete, Add as AddIcon, CleaningServices as CleaningServicesIcon, Build as BuildIcon, Warning as WarningIcon, Settings as SettingsIcon, AccessTime as AccessTimeIcon, ExpandMore as ExpandMoreIcon, People as PeopleIcon, Group as GroupIcon, Schedule as ScheduleIcon, PersonOff as PersonOffIcon, Send as SendIcon, CalendarToday as CalendarTodayIcon } from '@mui/icons-material';
+import { 
+    Edit, Delete, Add as AddIcon, CleaningServices as CleaningServicesIcon, Build as BuildIcon, Warning as WarningIcon, Settings as SettingsIcon, AccessTime as AccessTimeIcon, ExpandMore as ExpandMoreIcon, People as PeopleIcon, Group as GroupIcon, Schedule as ScheduleIcon, PersonOff as PersonOffIcon, Send as SendIcon, CalendarToday as CalendarTodayIcon, NotificationsActive as NotificationsActiveIcon // NUEVO: Importar NotificationsActiveIcon
+} from '@mui/icons-material';
 import { useFirestore } from '../hooks/useFirestore';
 import { useAuthStore } from '../store/authStore';
 import RegisterUserModal from '../components/RegisterUserModal';
+import NotificationSettings from '../components/NotificationSettings'; // NUEVO: Importar el componente de configuración
 
 const TabPanel = (props) => {
     const { children, value, index, ...other } = props;
@@ -654,7 +657,6 @@ export default function AdminDashboard() {
             if (targetAudience === 'all') {
                 targetUsers = users;
             } else if (targetAudience === 'role') {
-                // Aquí podrías añadir otro selector para elegir el rol, por ahora se envía a todos los no-admins
                 targetUsers = users.filter(u => u.userData.rol !== 'administrador');
             } else if (targetAudience === 'user' && selectedTargetUser) {
                 const user = users.find(u => u.userId === selectedTargetUser);
@@ -667,7 +669,6 @@ export default function AdminDashboard() {
                 return;
             }
 
-            // 1. Creamos un array con todos los IDs de usuario
             const userIds = targetUsers.map(user => user.userId);
 
             const notificationPayload = {
@@ -677,17 +678,16 @@ export default function AdminDashboard() {
                 data: { url: '/' }
             };
 
-            // 2. Enviamos una única solicitud con el array de IDs
             const response = await fetch('/.netlify/functions/send-notification', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    userIds: userIds, // <-- CAMBIO CLAVE: Enviamos un array
+                    userIds: userIds,
                     payload: notificationPayload,
+                    clientId: selectedClientId, // MODIFICADO: Añadir clientId para asegurar el envío correcto
                 }),
             });
 
-            // 3. Verificamos si la respuesta del servidor fue exitosa
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || 'Error al enviar la notificación.');
@@ -760,7 +760,6 @@ export default function AdminDashboard() {
 
     const handleWeeklyConfigChange = (day, vinculoId) => {
         if (!vinculoId) {
-            // Si no se selecciona un empleado, limpiar la configuración para ese día
             setWeeklyClosingConfig(prev => ({
                 ...prev,
                 [day]: { vinculoId: null, userId: null, userName: null }
@@ -789,7 +788,6 @@ export default function AdminDashboard() {
             if (success) {
                 alert("Configuración semanal de cierre guardada correctamente.");
                 
-                // Actualizar el encargado de cierre para hoy
                 const todayClosingPerson = await getTodayClosingPersonFromWeeklyConfig(selectedClientId);
                 setTodayClosingPerson(todayClosingPerson);
                 
@@ -842,6 +840,7 @@ export default function AdminDashboard() {
                         {selectedClientId && <Tab icon={<AccessTimeIcon sx={{ mr: 1 }} />} label="Cierre" />}
                         {selectedClientId && <Tab icon={<PeopleIcon sx={{ mr: 1 }} />} label="Conductores" />}
                         {selectedClientId && <Tab icon={<SendIcon sx={{ mr: 1 }} />} label="Notificaciones" />}
+                        {selectedClientId && <Tab icon={<NotificationsActiveIcon sx={{ mr: 1 }} />} label="Config. Notif." />} {/* NUEVA PESTAÑA */}
                     </Tabs>
                 </Box>
             )}
@@ -849,8 +848,7 @@ export default function AdminDashboard() {
             {!selectedClientId ? (
                 <React.Fragment>
                     <TabPanel value={tabValue} index={0}>
-                        {/* ... (Contenido de la pestaña Clientes sin cambios) ... */}
-                         <Button variant="contained" color="warning" startIcon={<AddIcon />} sx={{ mb: 2 }} onClick={() => handleOpenClientDialog(null, false)}>
+                        <Button variant="contained" color="warning" startIcon={<AddIcon />} sx={{ mb: 2 }} onClick={() => handleOpenClientDialog(null, false)}>
                             Registrar Nuevo Cliente (Empresa)
                         </Button>
                         <Box sx={{ width: '100%', overflowX: 'auto' }}>
@@ -883,8 +881,7 @@ export default function AdminDashboard() {
                     </TabPanel>
                     
                     <TabPanel value={tabValue} index={1}>
-                        {/* ... (Contenido de la pestaña Administrativa sin cambios) ... */}
-                         <Box sx={{ width: '100%', overflowX: 'auto' }}>
+                        <Box sx={{ width: '100%', overflowX: 'auto' }}>
                             <Typography variant="h5" gutterBottom>
                                 <SettingsIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
                                 Configuración Administrativa
@@ -994,8 +991,7 @@ export default function AdminDashboard() {
                 </React.Fragment>
             ) : (
                 <React.Fragment>
-                    {/* ... (TabPanel para Usuarios, Zonas, Cierre, Conductores sin cambios) ... */}
-                     <TabPanel value={tabValue} index={0}>
+                    <TabPanel value={tabValue} index={0}>
                         <Button variant="contained" color="warning" startIcon={<AddIcon />} sx={{ mb: 2 }} onClick={() => setRegisterModalOpen(true)}>
                             Registrar Nuevo Usuario
                         </Button>
@@ -1291,7 +1287,6 @@ export default function AdminDashboard() {
                         </Box>
                     </TabPanel>
 
-                    {/* --- NUEVA PESTAÑA DE NOTIFICACIONES --- */}
                     <TabPanel value={tabValue} index={4}>
                         <Typography variant="h5" gutterBottom>
                             <SendIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
@@ -1370,11 +1365,15 @@ export default function AdminDashboard() {
                             </Grid>
                         </Grid>
                     </TabPanel>
+
+                    {/* NUEVO TabPanel para la Configuración de Notificaciones */}
+                    <TabPanel value={tabValue} index={5}>
+                        <NotificationSettings />
+                    </TabPanel>
                 </React.Fragment>
             )}
 
-            {/* ... (Todos los Diálogos existentes sin cambios) ... */}
-             <Dialog open={configDialog.open} onClose={handleCloseConfigDialog} maxWidth="md" fullWidth>
+            <Dialog open={configDialog.open} onClose={handleCloseConfigDialog} maxWidth="md" fullWidth>
                 <DialogTitle>
                     <SettingsIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
                     Configuración Global de la Aplicación
@@ -1445,7 +1444,6 @@ export default function AdminDashboard() {
                 </DialogActions>
             </Dialog>
 
-            {/* --- NUEVO DIÁLOGO PARA CONFIGURACIÓN SEMANAL DE CIERRE --- */}
             <Dialog open={weeklyClosingConfigDialog.open} onClose={handleCloseWeeklyClosingConfigDialog} maxWidth="lg" fullWidth>
                 <DialogTitle>
                     <CalendarTodayIcon sx={{ verticalAlign: 'middle', mr: 1 }} />

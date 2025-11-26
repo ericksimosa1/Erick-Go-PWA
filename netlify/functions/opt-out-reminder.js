@@ -1,4 +1,4 @@
-// netlify/functions/save-subscription.js
+// netlify/functions/opt-out-reminder.js
 
 const admin = require('firebase-admin');
 
@@ -20,7 +20,7 @@ if (!admin.apps.length) {
 }
 
 exports.handler = async function (event, context) {
-  console.log('=== INICIO save-subscription (versión mejorada) ===');
+  console.log('=== INICIO opt-out-reminder ===');
   
   if (event.httpMethod !== 'POST') {
     return {
@@ -30,40 +30,39 @@ exports.handler = async function (event, context) {
   }
 
   try {
-    const { userId, subscription, clientId } = JSON.parse(event.body);
+    const { userId, clientId } = JSON.parse(event.body);
 
-    if (!userId || !subscription) {
-      console.log('Error: Faltan userId o subscription');
+    if (!userId || !clientId) {
+      console.log('Error: Faltan userId o clientId');
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'Faltan userId o subscription' }),
+        body: JSON.stringify({ error: 'Faltan userId o clientId' }),
       };
     }
 
     const db = admin.firestore();
+    const today = new Date();
     
-    // CAMBIO CLAVE: Ahora guardamos el clientId para asegurar que las notificaciones
-    // se envíen a los usuarios correctos dentro de su empresa.
+    // Guardar la marca de "opt-out" con la fecha de hoy en la suscripción del usuario
     await db.collection('suscripciones').doc(userId).set({
-      userId: userId,
-      clientId: clientId || null, 
-      subscription: subscription,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      dailyOptOut: true,
+      dailyOptOutDate: admin.firestore.Timestamp.fromDate(today),
+      clientId: clientId, // Aseguramos que el clientId esté presente
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    console.log(`Suscripción guardada para usuario: ${userId}, cliente: ${clientId}`);
+    console.log(`Usuario ${userId} ha optado por no usar transporte hoy (${today.toDateString()}) para el cliente ${clientId}`);
 
     return {
       statusCode: 200,
       body: JSON.stringify({ 
-        message: 'Suscripción guardada con éxito',
+        message: 'Opt-out registrado con éxito',
         userId: userId,
         clientId: clientId
       }),
     };
   } catch (error) {
-    console.error('Error al guardar la suscripción:', error);
+    console.error('Error al registrar opt-out:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: 'Error interno del servidor', details: error.message }),
