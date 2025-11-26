@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { CssBaseline, CircularProgress, Box, Snackbar, Alert, Button, Typography } from '@mui/material';
+import { CssBaseline, CircularProgress, Box, Snackbar, Alert } from '@mui/material';
 import { useAuthStore } from './store/authStore';
 import LoginPage from './pages/LoginPage';
 import CompanySelectorPage from './pages/CompanySelectorPage';
@@ -37,7 +37,6 @@ function AppContent() {
     const [subscription, setSubscription] = useState(null);
     const [notificationPermissionStatus, setNotificationPermissionStatus] = useState('');
     const [showPermissionSnackbar, setShowPermissionSnackbar] = useState(false);
-    const [testMessage, setTestMessage] = useState('');
     const [subscriptionError, setSubscriptionError] = useState('');
 
     // --- FUNCIÓN PARA ACTUALIZAR EL ESTADO DEL RECORDATORIO ---
@@ -198,37 +197,6 @@ function AppContent() {
         }
     };
     
-    // --- FUNCIÓN PARA ENVIAR UNA NOTIFICACIÓN DE PRUEBA ---
-    const sendTestNotification = async () => {
-        if (!subscription) {
-            setTestMessage('No hay una suscripción activa para enviar la notificación.');
-            return;
-        }
-        try {
-            const payload = JSON.stringify({
-                title: '¡Prueba desde Erick Go!',
-                body: 'Si ves esto, todo funciona correctamente.',
-                icon: '/erick-go-logo.png',
-            });
-
-            const response = await fetch('/.netlify/functions/send-notification', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    userIds: [user.uid], 
-                    payload: JSON.parse(payload),
-                    clientId: selectedClientId
-                }),
-            });
-
-            if (!response.ok) throw new Error('Error al enviar la notificación.');
-            setTestMessage('¡Notificación de prueba enviada! Revisa tu bandeja de entrada.');
-        } catch (error) {
-            console.error('Error al enviar notificación:', error);
-            setTestMessage('No se pudo enviar la notificación. Revisa la consola.');
-        }
-    };
-    
     // --- LÓGICA EXISTENTE DE LA APP ---
     useEffect(() => {
         const timer = setTimeout(() => setIsAppReady(true), 500);
@@ -295,19 +263,6 @@ function AppContent() {
                 >
                     <Alert onClose={() => setSubscriptionError('')} severity="error" sx={{ width: '100%' }}>
                         {subscriptionError}
-                    </Alert>
-                </Snackbar>
-            )}
-
-            {testMessage && (
-                <Snackbar 
-                    open={!!testMessage} 
-                    autoHideDuration={4000} 
-                    onClose={() => setTestMessage('')} 
-                    anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-                >
-                    <Alert onClose={() => setTestMessage('')} severity="info" sx={{ width: '100%' }}>
-                        {testMessage}
                     </Alert>
                 </Snackbar>
             )}
