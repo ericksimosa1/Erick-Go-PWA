@@ -8,12 +8,12 @@
 
 # --- CONFIGURACIÓN PARA TAREAS PROGRAMADAS (CRON JOBS) ---
 # Esta sección le dice a Netlify que ejecute nuestra función de recordatorios
-# cada 5 minutos. La función interna decidirá si es hora de enviar notificaciones.
+# cada 5 minutos. La función interna decidirá, basándose en la configuración del administrador,
+# si es el momento correcto de enviar notificaciones.
 
 [[scheduled_functions]]
   # Nombre de la función que queremos ejecutar
-  path = "/send-attendance-reminder"
-  
+  path = "/send-attendance-reminder"  
   # Programación en formato Cron.
   # "*/5 * * * *" significa: "en el minuto 0, 5, 10, 15... de cada hora, de cada día".
   schedule = "*/5 * * * *"
@@ -21,6 +21,5 @@
 [build]
   # Comando para construir tu aplicación
   command = "npm run build"
-  
   # Carpeta donde se encuentran los archivos estáticos generados
   publish = "dist"

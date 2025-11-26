@@ -1,9 +1,0 @@
-{
-  "name": "netlify-functions",
-  "version": "1.0.0",
-  "description": "Dependencias para las funciones de Erick Go PWA",
-  "dependencies": {
-    "firebase-admin": "^13.5.0",
-    "web-push": "^3.6.7"
-  }
-}
