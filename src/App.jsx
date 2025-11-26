@@ -1,284 +1,372 @@
-// src/App.jsx
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { CssBaseline, CircularProgress, Box, Snackbar, Alert } from '@mui/material';
-import { useAuthStore } from './store/authStore';
-import LoginPage from './pages/LoginPage';
-import CompanySelectorPage from './pages/CompanySelectorPage';
-import AdminDashboard from './pages/AdminDashboard';
-import EmployeeDashboard from './pages/EmployeeDashboard';
-import DriverDashboard from './pages/DriverDashboard';
-import MainLayout from './components/MainLayout';
+// netlify/functions/send-attendance-reminder.js (VERSIÓN CON FRECUENCIA CORREGIDA)
 
-// --- TEMA DE LA APLICACIÓN ---
-const erickGoTheme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: { main: '#1A237E' },
-    secondary: { main: '#00838F' },
-    warning: { main: '#FF8F00' },
-    error: { main: '#D50000' },
-  },
-  components: {
-    MuiCard: { styleOverrides: { root: { borderRadius: 12 } } },
-    MuiPaper: { styleOverrides: { root: { borderRadius: 12 } } },
-    MuiButton: { styleOverrides: { root: { borderRadius: 8, textTransform: 'none' } } },
-  },
-});
+const webPush = require('web-push');
+const admin = require('firebase-admin');
 
-// Componente principal que maneja la lógica de la aplicación
-function AppContent() {
-    const location = useLocation();
-    const { user, selectedClientId } = useAuthStore();
-    const [isAppReady, setIsAppReady] = useState(false);
-    
-    // --- ESTADOS PARA NOTIFICACIONES ---
-    const [subscription, setSubscription] = useState(null);
-    const [notificationPermissionStatus, setNotificationPermissionStatus] = useState('');
-    const [showPermissionSnackbar, setShowPermissionSnackbar] = useState(false);
-    const [subscriptionError, setSubscriptionError] = useState('');
-
-    // --- FUNCIÓN PARA ACTUALIZAR EL ESTADO DEL RECORDATORIO ---
-    const updateReminderStatus = async (action) => {
-        if (!user?.uid) {
-            console.error('No se puede actualizar el recordatorio sin un usuario logueado.');
-            return;
-        }
-        console.log(`Actualizando estado de recordatorio a: ${action} para el usuario: ${user.uid}`);
-        try {
-            await fetch('/.netlify/functions/update-reminder-status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: user.uid, action: action }),
-            });
-            console.log('Estado de recordatorio actualizado correctamente.');
-        } catch (error) {
-            console.error('Error al actualizar el estado del recordatorio:', error);
-        }
-    };
-
-    // --- EFECTO PARA REGISTRAR EL SERVICE WORKER ---
-    useEffect(() => {
-        const registerServiceWorker = async () => {
-            if ('serviceWorker' in navigator) {
-                try {
-                    const registration = await navigator.serviceWorker.register('/sw.js');
-                    console.log('Service Worker registrado con éxito:', registration);
-                } catch (error) {
-                    console.error('Error al registrar el Service Worker:', error);
-                }
-            }
-        };
-        registerServiceWorker();
-    }, []);
-
-    // --- EFECTO PARA SUSCRIBIR AL USUARIO A LAS NOTIFICACIONES PUSH ---
-    useEffect(() => {
-        if (user && selectedClientId) {
-            subscribeUserToPush();
-        }
-    }, [user, selectedClientId]);
-
-    // --- EFECTO PARA ESCUCHAR MENSAJES DEL SERVICE WORKER ---
-    useEffect(() => {
-        const handleMessage = (event) => {
-            if (event.data && event.data.type === 'NAVIGATE') {
-                const url = new URL(event.data.payload.url, window.location.origin);
-                const action = url.searchParams.get('action');
-
-                if (action) {
-                    console.log(`Acción recibida del Service Worker: ${action}`);
-                    if (action === 'going_on_my_own' || action === 'free') {
-                        updateReminderStatus(action);
-                    }
-                    window.location.href = '/login';
-                } else {
-                    window.location.href = event.data.payload.url;
-                }
-            }
-        };
-
-        navigator.serviceWorker.addEventListener('message', handleMessage);
-        return () => navigator.serviceWorker.removeEventListener('message', handleMessage);
-    }, [user]);
-
-    // --- FUNCIÓN PARA SUSCRIBIR AL USUARIO (VERSIÓN MEJORADA) ---
-    const subscribeUserToPush = async () => {
-        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-            console.warn('Las notificaciones push no son compatibles con este navegador.');
-            setSubscriptionError('Tu navegador no es compatible con notificaciones push.');
-            return;
-        }
-
-        try {
-            const registration = await navigator.serviceWorker.ready;
-            let permission = Notification.permission;
-            
-            if (permission === 'default') {
-                setShowPermissionSnackbar(true);
-                
-                setTimeout(async () => {
-                    try {
-                        permission = await Notification.requestPermission();
-                        setNotificationPermissionStatus(permission);
-                        
-                        if (permission !== 'granted') {
-                            setSubscriptionError('Has denegado el permiso para recibir notificaciones. Puedes cambiarlo en la configuración de tu navegador.');
-                            setShowPermissionSnackbar(false);
-                            return;
-                        }
-                        
-                        await processSubscription(registration);
-                    } catch (error) {
-                        console.error('Error al solicitar permiso de notificación:', error);
-                        setSubscriptionError('Error al solicitar permiso de notificación. Inténtalo de nuevo.');
-                        setShowPermissionSnackbar(false);
-                    }
-                }, 1000);
-            } else if (permission === 'granted') {
-                await processSubscription(registration);
-            } else {
-                setSubscriptionError('Has denegado previamente el permiso para recibir notificaciones. Puedes cambiarlo en la configuración de tu navegador.');
-            }
-        } catch (error) {
-            console.error('Error al suscribir al usuario a notificaciones push:', error);
-            
-            if (error.name === 'AbortError' && error.message.includes('push service error')) {
-                setSubscriptionError('No se pudo suscribir a las notificaciones. El navegador podría estar bloqueando el servicio de push.');
-            } else {
-                setSubscriptionError('Error inesperado al suscribir a las notificaciones. Inténtalo de nuevo.');
-            }
-        }
-    };
-
-    // --- FUNCIÓN AUXILIAR PARA PROCESAR LA SUSCRIPCIÓN ---
-    const processSubscription = async (registration) => {
-        try {
-            let subscription = await registration.pushManager.getSubscription();
-            
-            if (!subscription) {
-                const publicVapidKey = 'BL5HL7-NzkovXAWOzhIpDiqBmzBw-x5zOpEnrIqbIkKEGEPf8FOs87_oUcidqrU98-81J2nHXRDQufR6sfyxF2g';
-                subscription = await registration.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: urlB64ToUint8Array(publicVapidKey),
-                });
-            }
-            
-            setSubscription(subscription);
-            await saveSubscriptionToBackend(subscription);
-            console.log('Usuario suscrito a notificaciones push.');
-            setSubscriptionError('');
-        } catch (error) {
-            console.error('Error al procesar la suscripción:', error);
-            setSubscriptionError('Error al procesar la suscripción. Inténtalo de nuevo.');
-        }
-    };
-
-    // --- FUNCIÓN PARA GUARDAR LA SUSCRIPCIÓN EN NETLIFY ---
-    const saveSubscriptionToBackend = async (subscription) => {
-        if (!user?.uid || !selectedClientId) return;
-        try {
-            const response = await fetch('/.netlify/functions/save-subscription', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    subscription: subscription, 
-                    userId: user.uid,
-                    clientId: selectedClientId
-                }),
-            });
-            if (!response.ok) throw new Error('Error al guardar la suscripción en el backend.');
-            const data = await response.json();
-            console.log('Suscripción guardada en el backend:', data);
-        } catch (error) {
-            console.error('Error en saveSubscriptionToBackend:', error);
-            setSubscriptionError('Error al guardar la suscripción en el servidor. Inténtalo de nuevo.');
-        }
-    };
-    
-    // --- LÓGICA EXISTENTE DE LA APP ---
-    useEffect(() => {
-        const timer = setTimeout(() => setIsAppReady(true), 500);
-        return () => clearTimeout(timer);
-    }, []);
-
-    if (!isAppReady) {
-        return <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><CircularProgress /></Box>;
-    }
-
-    function urlB64ToUint8Array(base64String) {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) {
-            outputArray[i] = rawData.charCodeAt(i);
-        }
-        return outputArray;
-    }
-
-    return (
-        <>
-            <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/select-company" element={(user?.rol === 'conductor' || user?.rol === 'empleado') ? <CompanySelectorPage /> : <Navigate to="/login" replace />} />
-                <Route path="/admin-dashboard" element={user?.rol === 'administrador' ? <MainLayout><AdminDashboard /></MainLayout> : <Navigate to="/login" replace />} />
-                <Route path="/empleado-dashboard" element={user?.rol === 'empleado' ? <MainLayout><EmployeeDashboard /></MainLayout> : <Navigate to="/login" replace />} />
-                <Route path="/conductor-dashboard" element={user?.rol === 'conductor' ? <MainLayout><DriverDashboard /></MainLayout> : <Navigate to="/login" replace />} />
-                <Route path="/" element={<Navigate to="/login" replace />} />
-                <Route path="*" element={<Navigate to="/login" />} />
-            </Routes>
-
-            <Snackbar 
-                open={showPermissionSnackbar} 
-                autoHideDuration={6000} 
-                onClose={() => setShowPermissionSnackbar(false)} 
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            >
-                <Alert onClose={() => setShowPermissionSnackbar(false)} severity="info" sx={{ width: '100%' }}>
-                    Vamos a solicitar permiso para enviarte notificaciones importantes sobre tus viajes.
-                </Alert>
-            </Snackbar>
-
-            {notificationPermissionStatus && (
-                <Snackbar 
-                    open={true} 
-                    autoHideDuration={6000} 
-                    onClose={() => setNotificationPermissionStatus('')} 
-                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-                >
-                    <Alert onClose={() => setNotificationPermissionStatus('')} severity={notificationPermissionStatus === 'granted' ? 'success' : 'warning'} sx={{ width: '100%' }}>
-                        {notificationPermissionStatus === 'granted' ? '¡Notificaciones activadas!' : 'Las notificaciones están desactivadas.'}
-                    </Alert>
-                </Snackbar>
-            )}
-
-            {subscriptionError && (
-                <Snackbar 
-                    open={true} 
-                    autoHideDuration={8000} 
-                    onClose={() => setSubscriptionError('')} 
-                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-                >
-                    <Alert onClose={() => setSubscriptionError('')} severity="error" sx={{ width: '100%' }}>
-                        {subscriptionError}
-                    </Alert>
-                </Snackbar>
-            )}
-        </>
-    );
+// Verificar configuración de VAPID
+if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+  console.error('[DEBUG] Las claves VAPID no están configuradas en las variables de entorno');
 }
 
-function App() {
-    return (
-        <ThemeProvider theme={erickGoTheme}>
-            <CssBaseline />
-            <Router>
-                <AppContent />
-            </Router>
-        </ThemeProvider>
-    );
+// Verificar configuración de Firebase
+if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+  console.error('[DEBUG] Las credenciales de Firebase no están configuradas en las variables de entorno');
 }
 
-export default App;
+// Configurar claves VAPID
+webPush.setVapidDetails(
+  'mailto:erickgoapp@gmail.com',
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
+
+// Inicializar Firebase Admin si no está inicializado
+if (!admin.apps.length) {
+  try {
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        project_id: process.env.FIREBASE_PROJECT_ID,
+        client_email: process.env.FIREBASE_CLIENT_EMAIL,
+        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+      }),
+      databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
+    });
+    console.log('Firebase Admin inicializado correctamente');
+  } catch (error) {
+    console.error('Error al inicializar Firebase Admin:', error);
+  }
+}
+
+// FUNCIÓN PARA OBTENER LA CONFIGURACIÓN Y EL DOCUMENTO DE REFERENCIA
+async function getNotificationConfig(clientId) {
+  console.log(`[DEBUG] getNotificationConfig llamado para clientId: ${clientId}`);
+  try {
+    const db = admin.firestore();
+    const notificacionesSnapshot = await db.collection('clientes').doc(clientId)
+      .collection('configuracion').doc('notificaciones')
+      .collection('notificaciones')
+      .limit(1)
+      .get();
+    
+    if (!notificacionesSnapshot.empty) {
+      const configDoc = notificacionesSnapshot.docs[0];
+      console.log(`[DEBUG] Configuración encontrada para ${clientId} en el documento ${configDoc.id}:`, configDoc.data());
+      // Devolvemos los datos y el ID del documento para poder actualizarlo después
+      return { data: configDoc.data(), id: configDoc.id };
+    }
+    
+    console.log(`[DEBUG] No se encontró configuración para ${clientId}. Usando configuración por defecto.`);
+    return { 
+      data: {
+        enableNotifications: true,
+        enableAttendanceReminder: true,
+        attendanceReminderFrequency: 30, // Frecuencia por defecto de 30 minutos
+        attendanceReminderStartTime: '07:00',
+        attendanceReminderEndTime: '22:00',
+        enableClosingReminder: true,
+        closingReminderTime: '18:00',
+        enableTripNotifications: true,
+        batchSize: 10,
+        retryAttempts: 3
+      },
+      id: null // No hay documento que actualizar
+    };
+  } catch (error) {
+    console.error('[DEBUG] Error al obtener configuración de notificaciones:', error);
+    return null;
+  }
+}
+
+// ... (Las funciones getEmployeesNeedingReminder y sendNotificationsToUsers permanecen igual)
+// (Se omiten aquí por brevedad, pero deben incluirse en el archivo final)
+
+// Función para obtener empleados sin registrar asistencia hoy y que no han optado por salir
+async function getEmployeesNeedingReminder(clientId) {
+  console.log(`[DEBUG] getEmployeesNeedingReminder llamado para clientId: ${clientId}`);
+  try {
+    const db = admin.firestore();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    
+    console.log(`[DEBUG] Rango de fecha: ${today.toISOString()} a ${tomorrow.toISOString()}`);
+    
+    const vinculosSnapshot = await db.collection('vinculos')
+      .where('clientId', '==', clientId)
+      .where('rol', '==', 'empleado')
+      .where('activo', '==', true)
+      .get();
+    
+    console.log(`[DEBUG] Vínculos de empleados encontrados: ${vinculosSnapshot.size}`);
+    const employeeIds = vinculosSnapshot.docs.map(doc => doc.data().userId);
+    console.log(`[DEBUG] IDs de empleados encontrados:`, employeeIds);
+    
+    if (employeeIds.length === 0) {
+      console.log('[DEBUG] No hay empleados vinculados para este cliente.');
+      return [];
+    }
+    
+    const asistenciasSnapshot = await db.collection('asistencias')
+      .where('clientId', '==', clientId)
+      .where('fecha', '>=', admin.firestore.Timestamp.fromDate(today))
+      .where('fecha', '<', admin.firestore.Timestamp.fromDate(tomorrow))
+      .get();
+    
+    console.log(`[DEBUG] Asistencias de hoy encontradas: ${asistenciasSnapshot.size}`);
+    const employeeIdsWithAttendance = new Set();
+    asistenciasSnapshot.docs.forEach(doc => {
+      employeeIdsWithAttendance.add(doc.data().empleadoId);
+    });
+    console.log(`[DEBUG] IDs de empleados con asistencia registrada:`, Array.from(employeeIdsWithAttendance));
+    
+    const optedOutUserIds = new Set();
+    console.log('[DEBUG] Los campos dailyOptOut y dailyOptOutDate no existen. La función de opt-out está desactivada.');
+    
+    const employeesNeedingReminder = employeeIds.filter(id => 
+      !employeeIdsWithAttendance.has(id) && !optedOutUserIds.has(id)
+    );
+    
+    console.log(`[DEBUG] RESULTADO FINAL: Empleados que necesitan recordatorio:`, employeesNeedingReminder);
+    return employeesNeedingReminder;
+  } catch (error) {
+    console.error('[DEBUG] Error al obtener empleados que necesitan recordatorio:', error);
+    return [];
+  }
+}
+
+// Función para enviar notificaciones a usuarios (CORREGIDA)
+async function sendNotificationsToUsers(userIds, payload, clientId) {
+  console.log(`[DEBUG] sendNotificationsToUsers llamado para ${userIds.length} usuarios.`);
+  try {
+    if (!userIds || userIds.length === 0) {
+      console.log('[DEBUG] No hay usuarios a quienes notificar.');
+      return { success: true, message: 'No hay usuarios a quienes notificar' };
+    }
+    
+    const db = admin.firestore();
+    const results = [];
+    
+    for (const userId of userIds) {
+      console.log(`[DEBUG] Procesando notificación para el usuario: ${userId}`);
+      const doc = await db.collection('suscripciones').doc(userId).get();
+      if (!doc.exists) {
+        console.log(`[DEBUG] No se encontró suscripción para el usuario: ${userId}`);
+        results.push({ userId, success: false, error: 'Suscripción no encontrada' });
+        continue;
+      }
+
+      const subscription = doc.data().subscription;
+      
+      if (!subscription || !subscription.endpoint) {
+        console.log(`[DEBUG] Suscripción inválida para el usuario: ${userId}`);
+        results.push({ userId, success: false, error: 'Suscripción inválida' });
+        continue;
+      }
+      
+      const personalizedPayload = {
+        ...payload,
+        data: {
+          ...payload.data,
+          userId: userId,
+          clientId: clientId
+        }
+      };
+
+      try {
+        await webPush.sendNotification(subscription, JSON.stringify(personalizedPayload));
+        console.log(`[DEBUG] ✅ Recordatorio interactivo enviado con éxito al usuario: ${userId}`);
+        results.push({ userId, success: true });
+      } catch (error) {
+        console.error(`[DEBUG] ❌ Error al enviar recordatorio interactivo al usuario ${userId}:`, error.message);
+        
+        if (error.statusCode === 410) {
+          console.log(`[DEBUG] Eliminando suscripción inválida para el usuario: ${userId}`);
+          try {
+            await db.collection('suscripciones').doc(userId).delete();
+          } catch (deleteError) {
+            console.error(`[DEBUG] Error al eliminar suscripción inválida: ${deleteError.message}`);
+          }
+        }
+      
+        results.push({ userId, success: false, error: error.message });
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    console.log(`[DEBUG] Resultados del envío:`, results);
+    return { success: true, results };
+  } catch (error) {
+    console.error('[DEBUG] Error al enviar recordatorios:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+
+// Función para verificar si la hora actual está dentro del rango de recordatorios
+function isWithinReminderRange(startTime, endTime) {
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  
+  const [startHour, startMinute] = startTime.split(':').map(Number);
+  const [endHour, endMinute] = endTime.split(':').map(Number);
+  
+  const startMinutes = startHour * 60 + startMinute;
+  const endMinutes = endHour * 60 + endMinute;
+  
+  if (startMinutes > endMinutes) {
+    const isInRange = currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+    console.log(`[DEBUG] Verificación de hora (cruce medianoche): Hora actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
+    return isInRange;
+  } else {
+    const isInRange = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    console.log(`[DEBUG] Verificación de hora: Hora actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
+    return isInRange;
+  }
+}
+
+
+exports.handler = async function (event, context) {
+  console.log('=== INICIO send-attendance-reminder (VERSIÓN CON FRECUENCIA) ===');
+  console.log(`[DEBUG] Hora de ejecución del servidor: ${new Date().toISOString()}`);
+  
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || 
+      !process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    console.error('[DEBUG] Configuración incompleta. Verifica las variables de entorno.');
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Configuración incompleta' }),
+    };
+  }
+  
+  try {
+    const db = admin.firestore();
+    const clientsSnapshot = await db.collection('clientes').get();
+    
+    if (clientsSnapshot.empty) {
+      console.log('[DEBUG] No hay clientes activos.');
+      return { 
+        statusCode: 200, 
+        body: JSON.stringify({ message: 'No hay clientes activos.' }) 
+      };
+    }
+    
+    console.log(`[DEBUG] Se encontraron ${clientsSnapshot.size} clientes para procesar.`);
+    const results = [];
+    
+    for (const clientDoc of clientsSnapshot.docs) {
+      const clientId = clientDoc.id;
+      const clientName = clientDoc.data().nombre || 'Cliente sin nombre';
+      
+      console.log(`[DEBUG] --- Procesando cliente: ${clientName} (${clientId}) ---`);
+      
+      const configResult = await getNotificationConfig(clientId);
+      if (!configResult) continue;
+
+      const config = configResult.data;
+      const configDocId = configResult.id;
+      
+      if (!config.enableNotifications || !config.enableAttendanceReminder) {
+        console.log(`[DEBUG] Recordatorios de asistencia desactivados para el cliente: ${clientName}`);
+        continue;
+      }
+
+      console.log(`[DEBUG] Configuración para ${clientName}:`, config);
+
+      if (!isWithinReminderRange(config.attendanceReminderStartTime, config.attendanceReminderEndTime)) {
+        console.log(`[DEBUG] Fuera del rango horario de recordatorios para: ${clientName}`);
+        continue;
+      }
+      
+      // --- NUEVA LÓGICA DE FRECUENCIA BASADA EN TIMESTAMP ---
+      const lastSentTimestamp = config.lastAttendanceReminderSent;
+      const frequencyInMinutes = config.attendanceReminderFrequency || 30;
+      const now = new Date();
+      let shouldSend = false;
+
+      if (!lastSentTimestamp) {
+        console.log(`[DEBUG] No hay registro de último envío para ${clientName}. Se enviará el recordatorio.`);
+        shouldSend = true;
+      } else {
+        const lastSentDate = lastSentTimestamp.toDate();
+        const timeDifferenceInMillis = now.getTime() - lastSentDate.getTime();
+        const frequencyInMillis = frequencyInMinutes * 60 * 1000;
+
+        console.log(`[DEBUG] Verificación de frecuencia para ${clientName}: Último envío=${lastSentDate.toISOString()}, Frecuencia=${frequencyInMinutes}min, Diferencia=${Math.round(timeDifferenceInMillis / 60000)}min.`);
+        
+        if (timeDifferenceInMillis >= frequencyInMillis) {
+          shouldSend = true;
+        }
+      }
+
+      if (!shouldSend) {
+        console.log(`[DEBUG] Aún no es hora de enviar recordatorio para: ${clientName} según la frecuencia configurada.`);
+        continue;
+      }
+      
+      console.log(`[DEBUG] ¡Es hora! Enviando recordatorio de asistencia para: ${clientName}`);
+      
+      const employeesNeedingReminder = await getEmployeesNeedingReminder(clientId);
+      
+      if (employeesNeedingReminder.length > 0) {
+        console.log(`[DEBUG] ${employeesNeedingReminder.length} empleados necesitan recordatorio. Preparando payload...`);
+        const payload = {
+          title: '¡Recordatorio de Asistencia!',
+          body: 'Aún no has registrado tu asistencia ni zona de destino para hoy.',
+          icon: '/erick-go-logo.png',
+          tag: 'attendance-reminder',
+          renotify: true,
+          requireInteraction: true,
+          actions: [
+            { action: 'register_attendance', title: 'Registrar Asistencia' },
+            { action: 'opt_out_transport', title: 'No Usar Transporte Hoy' }
+          ],
+          data: { url: '/login', type: 'attendance_reminder' }
+        };
+        
+        const result = await sendNotificationsToUsers(employeesNeedingReminder, payload, clientId);
+        results.push({
+          clientId,
+          clientName,
+          type: 'attendance_reminder_interactive',
+          recipients: employeesNeedingReminder.length,
+          result
+        });
+
+        // --- ACTUALIZAR EL TIMESTAMP DEL ÚLTIMO ENVÍO ---
+        if (configDocId) {
+          try {
+            const configRef = db.collection('clientes').doc(clientId)
+              .collection('configuracion').doc('notificaciones')
+              .collection('notificaciones').doc(configDocId);
+            
+            await configRef.update({
+              lastAttendanceReminderSent: admin.firestore.FieldValue.serverTimestamp()
+            });
+            console.log(`[DEBUG] Timestamp de último envío actualizado para ${clientName}.`);
+          } catch (updateError) {
+            console.error(`[DEBUG] Error al actualizar el timestamp de último envío para ${clientName}:`, updateError);
+          }
+        }
+      } else {
+        console.log(`[DEBUG] Todos los empleados han registrado asistencia para: ${clientName}. No se actualiza el timestamp de envío.`);
+      }
+    }
+    
+    console.log('=== FIN send-attendance-reminder (VERSIÓN CON FRECUENCIA) ===');
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ 
+        message: 'Proceso de recordatorios interactivos completado.',
+        results: results
+      }),
+    };
+  } catch (error) {
+    console.error('[DEBUG] Error en la función de recordatorio interactivo:', error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Error interno del servidor', details: error.message }),
+    };
+  }
+};

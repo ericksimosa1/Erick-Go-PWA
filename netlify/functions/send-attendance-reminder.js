@@ -1,7 +1,17 @@
-// netlify/functions/send-attendance-reminder.js (VERSIÓN DEPURADA)
+// netlify/functions/send-attendance-reminder.js (VERSIÓN CORREGIDA)
 
 const webPush = require('web-push');
 const admin = require('firebase-admin');
+
+// Verificar configuración de VAPID
+if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+  console.error('[DEBUG] Las claves VAPID no están configuradas en las variables de entorno');
+}
+
+// Verificar configuración de Firebase
+if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+  console.error('[DEBUG] Las credenciales de Firebase no están configuradas en las variables de entorno');
+}
 
 // Configurar claves VAPID
 webPush.setVapidDetails(
@@ -27,18 +37,21 @@ if (!admin.apps.length) {
   }
 }
 
-// Función para obtener la configuración de notificaciones de un cliente
+// FUNCIÓN CORREGIDA: Ahora busca en la subcolección 'notificaciones'
 async function getNotificationConfig(clientId) {
   console.log(`[DEBUG] getNotificationConfig llamado para clientId: ${clientId}`);
   try {
     const db = admin.firestore();
-    const doc = await db.collection('clientes').doc(clientId)
+    const notificacionesSnapshot = await db.collection('clientes').doc(clientId)
       .collection('configuracion').doc('notificaciones')
+      .collection('notificaciones')
+      .limit(1) // Solo necesitamos el primer documento que encontremos
       .get();
     
-    if (doc.exists) {
-      console.log(`[DEBUG] Configuración encontrada para ${clientId}:`, doc.data());
-      return doc.data();
+    if (!notificacionesSnapshot.empty) {
+      const configDoc = notificacionesSnapshot.docs[0];
+      console.log(`[DEBUG] Configuración encontrada para ${clientId} en el documento ${configDoc.id}:`, configDoc.data());
+      return configDoc.data();
     }
     
     console.log(`[DEBUG] No se encontró configuración para ${clientId}. Usando configuración por defecto.`);
@@ -102,25 +115,10 @@ async function getEmployeesNeedingReminder(clientId) {
     });
     console.log(`[DEBUG] IDs de empleados con asistencia registrada:`, Array.from(employeeIdsWithAttendance));
     
-    // 3. Obtener las suscripciones para ver quién ha optado por salir hoy
-    const subscriptionsSnapshot = await db.collection('suscripciones')
-      .where('clientId', '==', clientId)
-      .get();
-    
-    console.log(`[DEBUG] Suscripciones encontradas para este cliente: ${subscriptionsSnapshot.size}`);
+    // 3. NOTA: La sección de "opt-out" está desactivada porque los campos no existen en tu base de datos.
+    // Esto no causará errores, simplemente no filtrará a nadie por esta razón.
     const optedOutUserIds = new Set();
-    subscriptionsSnapshot.docs.forEach(doc => {
-      const data = doc.data();
-      console.log(`[DEBUG] Revisando suscripción del usuario ${doc.id}. OptOut: ${data.dailyOptOut}, OptOutDate: ${data.dailyOptOutDate?.toDate()}`);
-      if (data.dailyOptOut && data.dailyOptOutDate) {
-        const optOutDate = data.dailyOptOutDate.toDate();
-        if (optOutDate.toDateString() === today.toDateString()) {
-          console.log(`[DEBUG] Usuario ${doc.id} ha optado por salir hoy.`);
-          optedOutUserIds.add(doc.id);
-        }
-      }
-    });
-    console.log(`[DEBUG] IDs de usuarios que han optado por salir:`, Array.from(optedOutUserIds));
+    console.log('[DEBUG] Los campos dailyOptOut y dailyOptOutDate no existen. La función de opt-out está desactivada.');
     
     // 4. Filtrar empleados que no tienen asistencia y no han optado por salir
     const employeesNeedingReminder = employeeIds.filter(id => 
@@ -147,7 +145,6 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
     const db = admin.firestore();
     const results = [];
     
-    // CAMBIO CLAVE: Ahora enviamos las notificaciones de una en una para poder personalizar los datos
     for (const userId of userIds) {
       console.log(`[DEBUG] Procesando notificación para el usuario: ${userId}`);
       const doc = await db.collection('suscripciones').doc(userId).get();
@@ -159,13 +156,18 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
 
       const subscription = doc.data().subscription;
       
-      // Creamos un payload personalizado para cada usuario
+      if (!subscription || !subscription.endpoint) {
+        console.log(`[DEBUG] Suscripción inválida para el usuario: ${userId}`);
+        results.push({ userId, success: false, error: 'Suscripción inválida' });
+        continue;
+      }
+      
       const personalizedPayload = {
         ...payload,
         data: {
           ...payload.data,
-          userId: userId, // ID del usuario específico
-          clientId: clientId // ID de la empresa
+          userId: userId,
+          clientId: clientId
         }
       };
 
@@ -188,7 +190,6 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
         results.push({ userId, success: false, error: error.message });
       }
       
-      // Pequeña pausa entre notificaciones para no sobrecargar el servicio
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
@@ -205,17 +206,35 @@ function isWithinReminderRange(startTime, endTime) {
   const now = new Date();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   
-  const startMinutes = parseInt(startTime.split(':')[0]) * 60 + parseInt(startTime.split(':')[1]);
-  const endMinutes = parseInt(endTime.split(':')[0]) * 60 + parseInt(endTime.split(':')[1]);
+  const [startHour, startMinute] = startTime.split(':').map(Number);
+  const [endHour, endMinute] = endTime.split(':').map(Number);
   
-  const isInRange = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
-  console.log(`[DEBUG] Verificación de hora: Hora actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
-  return isInRange;
+  const startMinutes = startHour * 60 + startMinute;
+  const endMinutes = endHour * 60 + endMinute;
+  
+  if (startMinutes > endMinutes) {
+    const isInRange = currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+    console.log(`[DEBUG] Verificación de hora (cruce medianoche): Hora actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
+    return isInRange;
+  } else {
+    const isInRange = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    console.log(`[DEBUG] Verificación de hora: Hora actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
+    return isInRange;
+  }
 }
 
 exports.handler = async function (event, context) {
-  console.log('=== INICIO send-attendance-reminder (VERSIÓN DEPURADA) ===');
+  console.log('=== INICIO send-attendance-reminder (VERSIÓN DEFINITIVA) ===');
   console.log(`[DEBUG] Hora de ejecución del servidor: ${new Date().toISOString()}`);
+  
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || 
+      !process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    console.error('[DEBUG] Configuración incompleta. Verifica las variables de entorno.');
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Configuración incompleta' }),
+    };
+  }
   
   try {
     const db = admin.firestore();
@@ -232,14 +251,12 @@ exports.handler = async function (event, context) {
     console.log(`[DEBUG] Se encontraron ${clientsSnapshot.size} clientes para procesar.`);
     const results = [];
     
-    // Procesar cada cliente
     for (const clientDoc of clientsSnapshot.docs) {
       const clientId = clientDoc.id;
-      const clientName = clientDoc.data().nombre;
+      const clientName = clientDoc.data().nombre || 'Cliente sin nombre';
       
       console.log(`[DEBUG] --- Procesando cliente: ${clientName} (${clientId}) ---`);
       
-      // Obtener configuración de notificaciones del cliente
       const config = await getNotificationConfig(clientId);
       
       if (!config || !config.enableNotifications || !config.enableAttendanceReminder) {
@@ -258,6 +275,8 @@ exports.handler = async function (event, context) {
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
       
       const frequencyInMinutes = config.attendanceReminderFrequency || 30;
+      // Lógica de frecuencia: La función se ejecuta cada 5 minutos por cron.
+      // Esta línea asegura que solo se envíe si el minuto actual es un múltiplo de la frecuencia.
       const shouldRun = currentMinutes % frequencyInMinutes === 0;
       console.log(`[DEBUG] Verificación de frecuencia: Minutos actuales=${currentMinutes}, Frecuencia=${frequencyInMinutes}, DebeEjecutarse=${shouldRun}`);
       
@@ -308,7 +327,7 @@ exports.handler = async function (event, context) {
       }
     }
     
-    console.log('=== FIN send-attendance-reminder (VERSIÓN DEPURADA) ===');
+    console.log('=== FIN send-attendance-reminder (VERSIÓN DEFINITIVA) ===');
     return {
       statusCode: 200,
       body: JSON.stringify({ 
