@@ -1,4 +1,4 @@
-// netlify/functions/send-attendance-reminder.js
+// netlify/functions/send-attendance-reminder.js (VERSIÓN DEPURADA)
 
 const webPush = require('web-push');
 const admin = require('firebase-admin');
@@ -29,6 +29,7 @@ if (!admin.apps.length) {
 
 // Función para obtener la configuración de notificaciones de un cliente
 async function getNotificationConfig(clientId) {
+  console.log(`[DEBUG] getNotificationConfig llamado para clientId: ${clientId}`);
   try {
     const db = admin.firestore();
     const doc = await db.collection('clientes').doc(clientId)
@@ -36,10 +37,11 @@ async function getNotificationConfig(clientId) {
       .get();
     
     if (doc.exists) {
+      console.log(`[DEBUG] Configuración encontrada para ${clientId}:`, doc.data());
       return doc.data();
     }
     
-    // Configuración por defecto si no existe
+    console.log(`[DEBUG] No se encontró configuración para ${clientId}. Usando configuración por defecto.`);
     return {
       enableNotifications: true,
       enableAttendanceReminder: true,
@@ -53,19 +55,22 @@ async function getNotificationConfig(clientId) {
       retryAttempts: 3
     };
   } catch (error) {
-    console.error('Error al obtener configuración de notificaciones:', error);
+    console.error('[DEBUG] Error al obtener configuración de notificaciones:', error);
     return null;
   }
 }
 
 // Función para obtener empleados sin registrar asistencia hoy y que no han optado por salir
 async function getEmployeesNeedingReminder(clientId) {
+  console.log(`[DEBUG] getEmployeesNeedingReminder llamado para clientId: ${clientId}`);
   try {
     const db = admin.firestore();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
+    
+    console.log(`[DEBUG] Rango de fecha: ${today.toISOString()} a ${tomorrow.toISOString()}`);
     
     // 1. Obtener todos los usuarios de tipo empleado para este cliente
     const vinculosSnapshot = await db.collection('vinculos')
@@ -74,9 +79,12 @@ async function getEmployeesNeedingReminder(clientId) {
       .where('activo', '==', true)
       .get();
     
+    console.log(`[DEBUG] Vínculos de empleados encontrados: ${vinculosSnapshot.size}`);
     const employeeIds = vinculosSnapshot.docs.map(doc => doc.data().userId);
+    console.log(`[DEBUG] IDs de empleados encontrados:`, employeeIds);
     
     if (employeeIds.length === 0) {
+      console.log('[DEBUG] No hay empleados vinculados para este cliente.');
       return [];
     }
     
@@ -87,44 +95,52 @@ async function getEmployeesNeedingReminder(clientId) {
       .where('fecha', '<', admin.firestore.Timestamp.fromDate(tomorrow))
       .get();
     
+    console.log(`[DEBUG] Asistencias de hoy encontradas: ${asistenciasSnapshot.size}`);
     const employeeIdsWithAttendance = new Set();
     asistenciasSnapshot.docs.forEach(doc => {
       employeeIdsWithAttendance.add(doc.data().empleadoId);
     });
+    console.log(`[DEBUG] IDs de empleados con asistencia registrada:`, Array.from(employeeIdsWithAttendance));
     
     // 3. Obtener las suscripciones para ver quién ha optado por salir hoy
     const subscriptionsSnapshot = await db.collection('suscripciones')
       .where('clientId', '==', clientId)
       .get();
     
+    console.log(`[DEBUG] Suscripciones encontradas para este cliente: ${subscriptionsSnapshot.size}`);
     const optedOutUserIds = new Set();
     subscriptionsSnapshot.docs.forEach(doc => {
       const data = doc.data();
-      // Comprobamos si ha optado por salir hoy y si la fecha de opt-out es hoy
+      console.log(`[DEBUG] Revisando suscripción del usuario ${doc.id}. OptOut: ${data.dailyOptOut}, OptOutDate: ${data.dailyOptOutDate?.toDate()}`);
       if (data.dailyOptOut && data.dailyOptOutDate) {
         const optOutDate = data.dailyOptOutDate.toDate();
         if (optOutDate.toDateString() === today.toDateString()) {
+          console.log(`[DEBUG] Usuario ${doc.id} ha optado por salir hoy.`);
           optedOutUserIds.add(doc.id);
         }
       }
     });
+    console.log(`[DEBUG] IDs de usuarios que han optado por salir:`, Array.from(optedOutUserIds));
     
     // 4. Filtrar empleados que no tienen asistencia y no han optado por salir
     const employeesNeedingReminder = employeeIds.filter(id => 
       !employeeIdsWithAttendance.has(id) && !optedOutUserIds.has(id)
     );
     
+    console.log(`[DEBUG] RESULTADO FINAL: Empleados que necesitan recordatorio:`, employeesNeedingReminder);
     return employeesNeedingReminder;
   } catch (error) {
-    console.error('Error al obtener empleados que necesitan recordatorio:', error);
+    console.error('[DEBUG] Error al obtener empleados que necesitan recordatorio:', error);
     return [];
   }
 }
 
 // Función para enviar notificaciones a usuarios (CORREGIDA)
 async function sendNotificationsToUsers(userIds, payload, clientId) {
+  console.log(`[DEBUG] sendNotificationsToUsers llamado para ${userIds.length} usuarios.`);
   try {
     if (!userIds || userIds.length === 0) {
+      console.log('[DEBUG] No hay usuarios a quienes notificar.');
       return { success: true, message: 'No hay usuarios a quienes notificar' };
     }
     
@@ -133,9 +149,10 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
     
     // CAMBIO CLAVE: Ahora enviamos las notificaciones de una en una para poder personalizar los datos
     for (const userId of userIds) {
+      console.log(`[DEBUG] Procesando notificación para el usuario: ${userId}`);
       const doc = await db.collection('suscripciones').doc(userId).get();
       if (!doc.exists) {
-        console.log(`No se encontró suscripción para el usuario: ${userId}`);
+        console.log(`[DEBUG] No se encontró suscripción para el usuario: ${userId}`);
         results.push({ userId, success: false, error: 'Suscripción no encontrada' });
         continue;
       }
@@ -154,17 +171,17 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
 
       try {
         await webPush.sendNotification(subscription, JSON.stringify(personalizedPayload));
-        console.log(`✅ Recordatorio interactivo enviado con éxito al usuario: ${userId}`);
+        console.log(`[DEBUG] ✅ Recordatorio interactivo enviado con éxito al usuario: ${userId}`);
         results.push({ userId, success: true });
       } catch (error) {
-        console.error(`❌ Error al enviar recordatorio interactivo al usuario ${userId}:`, error.message);
+        console.error(`[DEBUG] ❌ Error al enviar recordatorio interactivo al usuario ${userId}:`, error.message);
         
         if (error.statusCode === 410) {
-          console.log(`Eliminando suscripción inválida para el usuario: ${userId}`);
+          console.log(`[DEBUG] Eliminando suscripción inválida para el usuario: ${userId}`);
           try {
             await db.collection('suscripciones').doc(userId).delete();
           } catch (deleteError) {
-            console.error(`Error al eliminar suscripción inválida: ${deleteError.message}`);
+            console.error(`[DEBUG] Error al eliminar suscripción inválida: ${deleteError.message}`);
           }
         }
       
@@ -175,9 +192,10 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
+    console.log(`[DEBUG] Resultados del envío:`, results);
     return { success: true, results };
   } catch (error) {
-    console.error('Error al enviar recordatorios:', error);
+    console.error('[DEBUG] Error al enviar recordatorios:', error);
     return { success: false, error: error.message };
   }
 }
@@ -190,40 +208,49 @@ function isWithinReminderRange(startTime, endTime) {
   const startMinutes = parseInt(startTime.split(':')[0]) * 60 + parseInt(startTime.split(':')[1]);
   const endMinutes = parseInt(endTime.split(':')[0]) * 60 + parseInt(endTime.split(':')[1]);
   
-  return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  const isInRange = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  console.log(`[DEBUG] Verificación de hora: Hora actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
+  return isInRange;
 }
 
 exports.handler = async function (event, context) {
-  console.log('=== INICIO send-attendance-reminder (versión interactiva) ===');
+  console.log('=== INICIO send-attendance-reminder (VERSIÓN DEPURADA) ===');
+  console.log(`[DEBUG] Hora de ejecución del servidor: ${new Date().toISOString()}`);
   
   try {
     const db = admin.firestore();
     const clientsSnapshot = await db.collection('clientes').get();
     
     if (clientsSnapshot.empty) {
+      console.log('[DEBUG] No hay clientes activos.');
       return { 
         statusCode: 200, 
         body: JSON.stringify({ message: 'No hay clientes activos.' }) 
       };
     }
     
+    console.log(`[DEBUG] Se encontraron ${clientsSnapshot.size} clientes para procesar.`);
     const results = [];
     
+    // Procesar cada cliente
     for (const clientDoc of clientsSnapshot.docs) {
       const clientId = clientDoc.id;
       const clientName = clientDoc.data().nombre;
       
-      console.log(`Procesando cliente: ${clientName} (${clientId})`);
+      console.log(`[DEBUG] --- Procesando cliente: ${clientName} (${clientId}) ---`);
       
+      // Obtener configuración de notificaciones del cliente
       const config = await getNotificationConfig(clientId);
       
       if (!config || !config.enableNotifications || !config.enableAttendanceReminder) {
-        console.log(`Recordatorios de asistencia desactivados para el cliente: ${clientName}`);
+        console.log(`[DEBUG] Recordatorios de asistencia desactivados para el cliente: ${clientName}`);
         continue;
       }
 
+      console.log(`[DEBUG] Configuración para ${clientName}:`, config);
+
       if (!isWithinReminderRange(config.attendanceReminderStartTime, config.attendanceReminderEndTime)) {
-        console.log(`Fuera del rango horario de recordatorios para: ${clientName}`);
+        console.log(`[DEBUG] Fuera del rango horario de recordatorios para: ${clientName}`);
         continue;
       }
       
@@ -231,16 +258,20 @@ exports.handler = async function (event, context) {
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
       
       const frequencyInMinutes = config.attendanceReminderFrequency || 30;
-      if (currentMinutes % frequencyInMinutes !== 0) {
-        console.log(`No es hora de enviar recordatorio para: ${clientName} (frecuencia: ${frequencyInMinutes} min)`);
+      const shouldRun = currentMinutes % frequencyInMinutes === 0;
+      console.log(`[DEBUG] Verificación de frecuencia: Minutos actuales=${currentMinutes}, Frecuencia=${frequencyInMinutes}, DebeEjecutarse=${shouldRun}`);
+      
+      if (!shouldRun) {
+        console.log(`[DEBUG] No es hora de enviar recordatorio para: ${clientName}`);
         continue;
       }
       
-      console.log(`Enviando recordatorio de asistencia para: ${clientName}`);
+      console.log(`[DEBUG] Enviando recordatorio de asistencia para: ${clientName}`);
       
       const employeesNeedingReminder = await getEmployeesNeedingReminder(clientId);
       
       if (employeesNeedingReminder.length > 0) {
+        console.log(`[DEBUG] ${employeesNeedingReminder.length} empleados necesitan recordatorio. Preparando payload...`);
         const payload = {
           title: '¡Recordatorio de Asistencia!',
           body: 'Aún no has registrado tu asistencia ni zona de destino para hoy.',
@@ -273,10 +304,11 @@ exports.handler = async function (event, context) {
           result
         });
       } else {
-        console.log(`Todos los empleados han registrado asistencia o han optado por salir para: ${clientName}`);
+        console.log(`[DEBUG] Todos los empleados han registrado asistencia o han optado por salir para: ${clientName}`);
       }
     }
     
+    console.log('=== FIN send-attendance-reminder (VERSIÓN DEPURADA) ===');
     return {
       statusCode: 200,
       body: JSON.stringify({ 
@@ -285,7 +317,7 @@ exports.handler = async function (event, context) {
       }),
     };
   } catch (error) {
-    console.error('Error en la función de recordatorio interactivo:', error);
+    console.error('[DEBUG] Error en la función de recordatorio interactivo:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: 'Error interno del servidor', details: error.message }),

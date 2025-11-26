@@ -106,10 +106,22 @@ export default function NotificationSettings() {
     }
   };
 
+  // =================================================================
+  // INICIO DE LA FUNCIÓN CORREGIDA
+  // =================================================================
   const sendTestNotification = async () => {
     try {
       setLoading(true);
+      setError('');
       
+      // 1. Creamos el objeto de la notificación directamente
+      const notificationPayload = {
+        title: testNotificationTitle || 'Notificación de Prueba',
+        body: testNotificationBody || 'Esta es una notificación de prueba para verificar la configuración.',
+        icon: '/erick-go-logo.png'
+      };
+
+      // 2. Lo enviamos en el cuerpo de la petición, JSON.stringify solo una vez
       const response = await fetch('/.netlify/functions/send-notification', {
         method: 'POST',
         headers: {
@@ -117,16 +129,12 @@ export default function NotificationSettings() {
         },
         body: JSON.stringify({
           clientId: selectedClientId,
-          payload: {
-            title: testNotificationTitle || 'Notificación de Prueba',
-            body: testNotificationBody || 'Esta es una notificación de prueba para verificar la configuración.',
-            icon: '/erick-go-logo.png'
-          }
+          payload: notificationPayload, // <-- PASAMOS EL OBJETO DIRECTAMENTE
         })
       });
       
       if (!response.ok) {
-        throw new Error('Error al enviar la notificación de prueba');
+        throw new Error('Error al enviar la notificación de prueba.');
       }
       
       setSuccessMessage('Notificación de prueba enviada a todos los usuarios de la empresa');
@@ -136,11 +144,14 @@ export default function NotificationSettings() {
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error) {
       console.error('Error al enviar notificación de prueba:', error);
-      setError('Error al enviar la notificación de prueba. Inténtalo de nuevo.');
+      setError('Error al enviar la notificación de prueba. Revisa la consola para más detalles.');
     } finally {
       setLoading(false);
     }
   };
+  // =================================================================
+  // FIN DE LA FUNCIÓN CORREGIDA
+  // =================================================================
 
   return (
     <Box sx={{ p: 3 }}>
