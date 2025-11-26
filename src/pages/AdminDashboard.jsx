@@ -6,12 +6,12 @@ import {
     DialogContent, DialogActions, TextField, IconButton, Alert, FormControl, InputLabel, Select, MenuItem, Checkbox, ListItem, ListItemText, List, DialogContentText, Divider, CircularProgress, Card, CardContent, CardActions, Grid, Accordion, AccordionSummary, AccordionDetails, Chip
 } from '@mui/material';
 import { 
-    Edit, Delete, Add as AddIcon, CleaningServices as CleaningServicesIcon, Build as BuildIcon, Warning as WarningIcon, Settings as SettingsIcon, AccessTime as AccessTimeIcon, ExpandMore as ExpandMoreIcon, People as PeopleIcon, Group as GroupIcon, Schedule as ScheduleIcon, PersonOff as PersonOffIcon, Send as SendIcon, CalendarToday as CalendarTodayIcon, NotificationsActive as NotificationsActiveIcon // NUEVO: Importar NotificationsActiveIcon
+    Edit, Delete, Add as AddIcon, CleaningServices as CleaningServicesIcon, Build as BuildIcon, Warning as WarningIcon, Settings as SettingsIcon, AccessTime as AccessTimeIcon, ExpandMore as ExpandMoreIcon, People as PeopleIcon, Group as GroupIcon, Schedule as ScheduleIcon, PersonOff as PersonOffIcon, Send as SendIcon, CalendarToday as CalendarTodayIcon, NotificationsActive as NotificationsActiveIcon 
 } from '@mui/icons-material';
 import { useFirestore } from '../hooks/useFirestore';
 import { useAuthStore } from '../store/authStore';
 import RegisterUserModal from '../components/RegisterUserModal';
-import NotificationSettings from '../components/NotificationSettings'; // NUEVO: Importar el componente de configuración
+import NotificationSettings from '../components/NotificationSettings';
 
 const TabPanel = (props) => {
     const { children, value, index, ...other } = props;
@@ -22,8 +22,8 @@ const TabPanel = (props) => {
             {...other}
             style={{ 
                 overflow: 'auto',
-                height: 'calc(100vh - 160px)', // Ajustar altura para permitir desplazamiento
-                width: '100%' // Asegurar que ocupe todo el ancho
+                height: 'calc(100vh - 160px)',
+                width: '100%'
             }}
         >
             {value === index && <Box sx={{ p: 3, width: '100%' }}>{children}</Box>}
@@ -44,7 +44,6 @@ export default function AdminDashboard() {
         getTodayClosingTime,
         fetchTodayAsistencias,
         deleteEmployeeAttendanceForToday,
-        // Nuevas funciones para configuración semanal
         fetchWeeklyClosingConfig,
         updateWeeklyClosingConfig,
         getTodayClosingPersonFromWeeklyConfig,
@@ -55,35 +54,30 @@ export default function AdminDashboard() {
     const [users, setUsers] = useState([]);
     const [editUserDialog, setEditUserDialog] = useState({ open: false, user: null, vinculoId: null });
     const [registerModalOpen, setRegisterModalOpen] = useState(false);
-    const [zones, setZones] = useState([]);
+    const [zones, setZones] = useState([]); // <-- LÍNEA CLAVE 1: Declaración de 'zones' y 'setZones'
     const [isLoading, setIsLoading] = useState(false);
     const [todayAsistencias, setTodayAsistencias] = useState([]);
 
     const [clientDialog, setClientDialog] = useState({ open: false, client: null, isEdit: false });
     const [zoneDialog, setZoneDialog] = useState({ open: false, zone: null, isEdit: false });
 
-    // Estados para las herramientas administrativas
     const [deleteDialog, setDeleteDialog] = useState({ open: false, role: null });
     const [createTestDataDialog, setCreateTestDataDialog] = useState({ open: false });
     const [isProcessing, setIsProcessing] = useState(false);
     
-    // Estado para la configuración global
     const [globalConfig, setGlobalConfig] = useState({
         loginFooterText: 'Copyright © 2025 Desarrollado por Erick Go\nerickgoapp@gmail.com - 0424 3036024'
     });
     const [configDialog, setConfigDialog] = useState({ open: false });
     const [configLoading, setConfigLoading] = useState(false);
 
-    // Estado para el encargado de cierre
     const [closingPersonDialog, setClosingPersonDialog] = useState({ open: false });
     const [selectedClosingPerson, setSelectedClosingPerson] = useState('');
     const [todayClosingPerson, setTodayClosingPerson] = useState(null);
     const [closingPersonLoading, setClosingPersonLoading] = useState(false);
 
-    // Estado para la hora de cierre
     const [closingTime, setClosingTime] = useState(null);
 
-    // --- ESTADOS PARA EL SISTEMA DE NOTIFICACIONES ---
     const [notificationTitle, setNotificationTitle] = useState('');
     const [notificationBody, setNotificationBody] = useState('');
     const [targetAudience, setTargetAudience] = useState('all');
@@ -91,7 +85,6 @@ export default function AdminDashboard() {
     const [isSendingNotification, setIsSendingNotification] = useState(false);
     const [notificationSuccess, setNotificationSuccess] = useState('');
 
-    // --- ESTADOS PARA CONFIGURACIÓN SEMANAL DE CIERRE ---
     const [weeklyClosingConfigDialog, setWeeklyClosingConfigDialog] = useState({ open: false });
     const [weeklyClosingConfig, setWeeklyClosingConfig] = useState({
         lunes: { vinculoId: null, userId: null, userName: null },
@@ -127,7 +120,6 @@ export default function AdminDashboard() {
         return () => clearTimeout(timer);
     }, []);
 
-    // Cargar configuración global al iniciar
     useEffect(() => {
         if (!isAppReady) return;
         
@@ -152,21 +144,21 @@ export default function AdminDashboard() {
             try {
                 if (selectedClientId) {
                     const usersData = await fetchUsersByClient(selectedClientId);
-                    const zonesData = await fetchZones(selectedClientId);
+                    const zonesData = await fetchZones(selectedClientId); // <-- LÍNEA CLAVE 2: Uso de 'fetchZones'
                     const closingPerson = await getTodayClosingPersonFromWeeklyConfig(selectedClientId);
                     const todayClosingTime = await getTodayClosingTime(selectedClientId);
                     const asistenciaData = await fetchTodayAsistencias(selectedClientId);
                     const weeklyConfig = await fetchWeeklyClosingConfig(selectedClientId);
 
                     setUsers(sortUsersByRole(usersData));
-                    setZones(zonesData);
+                    setZones(zonesData); // <-- LÍNEA CLAVE 3: Uso de 'setZones'
                     setTodayClosingPerson(closingPerson);
                     setClosingTime(todayClosingTime);
                     setTodayAsistencias(asistenciaData);
                     setWeeklyClosingConfig(weeklyConfig);
                 } else {
                     setUsers([]);
-                    setZonas([]);
+                    setZones([]); // <-- LÍNEA CLAVE 4: Uso de 'setZonas'
                     setTodayClosingPerson(null);
                     setClosingTime(null);
                     setTodayAsistencias([]);
@@ -189,7 +181,6 @@ export default function AdminDashboard() {
         fetchData();
     }, [isAppReady, selectedClientId, fetchUsersByClient, fetchZones, getTodayClosingPersonFromWeeklyConfig, getTodayClosingTime, fetchTodayAsistencias, fetchWeeklyClosingConfig]);
 
-    // Resetear tabValue cuando cambia selectedClientId
     useEffect(() => {
         setTabValue(0);
     }, [selectedClientId]);
@@ -503,7 +494,6 @@ export default function AdminDashboard() {
         }));
     };
 
-    // Funciones para las herramientas administrativas
     const handleOpenDeleteDialog = (role) => {
         setDeleteDialog({ open: true, role });
     };
@@ -574,7 +564,6 @@ export default function AdminDashboard() {
         }
     };
 
-    // Funciones para la configuración global
     const handleOpenConfigDialog = () => {
         setConfigDialog({ open: true });
     };
@@ -604,7 +593,6 @@ export default function AdminDashboard() {
         }));
     };
 
-    // Funciones para el encargado de cierre
     const handleOpenClosingPersonDialog = () => {
         setClosingPersonDialog({ open: true });
         setSelectedClosingPerson('');
@@ -642,7 +630,6 @@ export default function AdminDashboard() {
         }
     };
 
-    // --- FUNCIÓN CORREGIDA PARA ENVIAR NOTIFICACIONES MANUALES ---
     const handleSendManualNotification = async () => {
         if (!notificationTitle || !notificationBody) {
             alert('Por favor, completa tanto el título como el cuerpo de la notificación.');
@@ -684,7 +671,7 @@ export default function AdminDashboard() {
                 body: JSON.stringify({
                     userIds: userIds,
                     payload: notificationPayload,
-                    clientId: selectedClientId, // MODIFICADO: Añadir clientId para asegurar el envío correcto
+                    clientId: selectedClientId,
                 }),
             });
 
@@ -707,7 +694,6 @@ export default function AdminDashboard() {
         }
     };
 
-    // Función para obtener empleados disponibles para un conductor
     const getAvailableEmployeesForDriver = (driver) => {
         if (!driver || !driver.zonasAsignadas || driver.zonasAsignadas.length === 0) {
             return [];
@@ -722,7 +708,6 @@ export default function AdminDashboard() {
         return employeesWithAsistencia;
     };
 
-    // Función para obtener empleados por grupo de zonas
     const getEmployeesByZoneGroup = (driver, group) => {
         if (!driver || !group || !group.zonas || group.zonas.length === 0) {
             return [];
@@ -737,19 +722,16 @@ export default function AdminDashboard() {
         return employeesWithAsistencia;
     };
 
-    // Función para obtener el nombre de una zona por su ID
     const getZoneNameById = (zoneId) => {
         const zone = zones.find(z => z.id === zoneId);
         return zone ? zone.nombre : 'Zona desconocida';
     };
 
-    // Función para obtener el nombre de un empleado por su ID
     const getEmployeeNameById = (employeeId) => {
         const employee = users.find(u => u.userId === employeeId);
         return employee ? employee.userData.nombre : 'Empleado desconocido';
     };
 
-    // --- FUNCIONES PARA CONFIGURACIÓN SEMANAL DE CIERRE ---
     const handleOpenWeeklyClosingConfigDialog = () => {
         setWeeklyClosingConfigDialog({ open: true });
     };
@@ -840,7 +822,7 @@ export default function AdminDashboard() {
                         {selectedClientId && <Tab icon={<AccessTimeIcon sx={{ mr: 1 }} />} label="Cierre" />}
                         {selectedClientId && <Tab icon={<PeopleIcon sx={{ mr: 1 }} />} label="Conductores" />}
                         {selectedClientId && <Tab icon={<SendIcon sx={{ mr: 1 }} />} label="Notificaciones" />}
-                        {selectedClientId && <Tab icon={<NotificationsActiveIcon sx={{ mr: 1 }} />} label="Config. Notif." />} {/* NUEVA PESTAÑA */}
+                        {selectedClientId && <Tab icon={<NotificationsActiveIcon sx={{ mr: 1 }} />} label="Config. Notif." />}
                     </Tabs>
                 </Box>
             )}
@@ -1366,7 +1348,6 @@ export default function AdminDashboard() {
                         </Grid>
                     </TabPanel>
 
-                    {/* NUEVO TabPanel para la Configuración de Notificaciones */}
                     <TabPanel value={tabValue} index={5}>
                         <NotificationSettings />
                     </TabPanel>

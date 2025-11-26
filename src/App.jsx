@@ -262,15 +262,6 @@ function AppContent() {
                 <Route path="*" element={<Navigate to="/login" />} />
             </Routes>
 
-            {/* --- BOTÓN DE PRUEBA Y SNACKBARS --- */}
-            {subscription && (
-                <Box sx={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999 }}>
-                    <Button variant="contained" color="secondary" onClick={sendTestNotification}>
-                        Enviar Notificación de Prueba
-                    </Button>
-                </Box>
-            )}
-
             <Snackbar 
                 open={showPermissionSnackbar} 
                 autoHideDuration={6000} 
