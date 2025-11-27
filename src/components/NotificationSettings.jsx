@@ -1,12 +1,44 @@
-// src/components/NotificationSettings.jsx
-import React, { useState, useEffect } from 'react';
+// src/components/NotificationSettings.jsx (VERSIÓN CORREGIDA CON FORMATO 12H)
+
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Typography, Card, CardContent, Switch, FormControlLabel,
   TextField, Button, Grid, Divider, Alert, Dialog, DialogTitle,
-  DialogContent, DialogActions
+  DialogContent, DialogActions, Select, MenuItem
 } from '@mui/material';
 import { Save as SaveIcon, Schedule as ScheduleIcon, NotificationsActive as NotificationsActiveIcon } from '@mui/icons-material';
 import { useAuthStore } from '../store/authStore';
+
+// --- FUNCIONES AUXILIARES PARA CONVERSIÓN DE HORA ---
+
+// Función para convertir hora de 24h a 12h con AM/PM
+const convertTo12HourFormat = useCallback((time24) => {
+    if (!time24) return { time: '12:00', ampm: 'AM' };
+    const [hours, minutes] = time24.split(':');
+    let hoursNum = parseInt(hours, 10);
+    const minutesNum = parseInt(minutes, 10);
+    const period = hoursNum >= 12 ? 'PM' : 'AM';
+    hoursNum = hoursNum % 12 || 12;
+    const formattedHours = hoursNum.toString().padStart(2, '0');
+    const formattedMinutes = minutesNum.toString().padStart(2, '0');
+    return { time: `${formattedHours}:${formattedMinutes}`, ampm: period };
+}, []);
+
+// Función para convertir hora de 12h a 24h
+const convertTo24HourFormat = useCallback((time12, ampm) => {
+    if (!time12) return '';
+    const [hours, minutes] = time12.split(':');
+    let hoursNum = parseInt(hours, 10);
+    if (ampm === 'PM' && hoursNum < 12) {
+        hoursNum += 12;
+    } else if (ampm === 'AM' && hoursNum === 12) {
+        hoursNum = 0;
+    }
+    const formattedHours = hoursNum.toString().padStart(2, '0');
+    const formattedMinutes = minutes.toString().padStart(2, '0');
+    return `${formattedHours}:${formattedMinutes}`;
+}, []);
+
 
 export default function NotificationSettings() {
   const { selectedClientId } = useAuthStore();
@@ -15,15 +47,15 @@ export default function NotificationSettings() {
     // Configuración general
     enableNotifications: true,
     
-    // Recordatorios de asistencia
+    // Recordatorios de asistencia (CAMBIADO a objeto 12h)
     enableAttendanceReminder: true,
-    attendanceReminderStartTime: '07:00', // NUEVO: Hora de inicio
-    attendanceReminderEndTime: '10:00',   // NUEVO: Hora de fin
-    attendanceReminderFrequency: 30,       // NUEVO: Frecuencia en minutos
+    attendanceReminderStartTime: { time: '07:00', ampm: 'PM' }, 
+    attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },   
+    attendanceReminderFrequency: 30,       
     
-    // Recordatorios de cierre
+    // Recordatorios de cierre (CAMBIADO a objeto 12h)
     enableClosingReminder: true,
-    closingReminderTime: '18:00',
+    closingReminderTime: { time: '06:00', ampm: 'PM' },
     
     // Notificaciones de viajes
     enableTripNotifications: true,
@@ -40,6 +72,18 @@ export default function NotificationSettings() {
   useEffect(() => {
     if (selectedClientId) {
       loadNotificationConfig();
+    } else {
+        // Resetear configuración si no hay cliente seleccionado
+        setNotificationConfig({
+            enableNotifications: true,
+            enableAttendanceReminder: true,
+            attendanceReminderStartTime: { time: '07:00', ampm: 'PM' },
+            attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },
+            attendanceReminderFrequency: 30,
+            enableClosingReminder: true,
+            closingReminderTime: { time: '06:00', ampm: 'PM' },
+            enableTripNotifications: true,
+        });
     }
   }, [selectedClientId]);
 
@@ -57,8 +101,18 @@ export default function NotificationSettings() {
       const data = await response.json();
       
       if (data.config) {
-        setNotificationConfig(data.config);
-        console.log('Configuración de notificaciones cargada:', data.config);
+        // CONVERSIÓN: Convertimos las horas de 24h del backend a 12h para la UI
+        const startTime12h = convertTo12HourFormat(data.config.attendanceReminderStartTime || '19:00');
+        const endTime12h = convertTo12HourFormat(data.config.attendanceReminderEndTime || '22:30');
+        const closingTime12h = convertTo12HourFormat(data.config.closingReminderTime || '18:00');
+
+        setNotificationConfig({
+          ...data.config,
+          attendanceReminderStartTime: startTime12h,
+          attendanceReminderEndTime: endTime12h,
+          closingReminderTime: closingTime12h,
+        });
+        console.log('Configuración de notificaciones cargada y convertida:', data.config);
       }
       
     } catch (error) {
@@ -69,6 +123,15 @@ export default function NotificationSettings() {
     }
   };
 
+  // MANEJADORES ACTUALIZADOS para el nuevo objeto de hora
+  const handleTimeChange = (field, timeValue) => {
+    setNotificationConfig(prev => ({ ...prev, [field]: { ...prev[field], time: timeValue } }));
+  };
+
+  const handleAmPmChange = (field, ampmValue) => {
+    setNotificationConfig(prev => ({ ...prev, [field]: { ...prev[field], ampm: ampmValue } }));
+  };
+  
   const handleConfigChange = (field, value) => {
     setNotificationConfig(prev => ({
       ...prev,
@@ -81,6 +144,14 @@ export default function NotificationSettings() {
       setLoading(true);
       setError('');
       
+      // CONVERSIÓN: Convertimos las horas de 12h de la UI a 24h para el backend
+      const payloadToSave = {
+        ...notificationConfig,
+        attendanceReminderStartTime: convertTo24HourFormat(notificationConfig.attendanceReminderStartTime.time, notificationConfig.attendanceReminderStartTime.ampm),
+        attendanceReminderEndTime: convertTo24HourFormat(notificationConfig.attendanceReminderEndTime.time, notificationConfig.attendanceReminderEndTime.ampm),
+        closingReminderTime: convertTo24HourFormat(notificationConfig.closingReminderTime.time, notificationConfig.closingReminderTime.ampm),
+      };
+      
       const response = await fetch('/.netlify/functions/save-notification-config', {
         method: 'POST',
         headers: {
@@ -88,7 +159,7 @@ export default function NotificationSettings() {
         },
         body: JSON.stringify({
           clientId: selectedClientId,
-          config: notificationConfig
+          config: payloadToSave,
         })
       });
       
@@ -106,22 +177,17 @@ export default function NotificationSettings() {
     }
   };
 
-  // =================================================================
-  // INICIO DE LA FUNCIÓN CORREGIDA
-  // =================================================================
   const sendTestNotification = async () => {
     try {
       setLoading(true);
       setError('');
       
-      // 1. Creamos el objeto de la notificación directamente
       const notificationPayload = {
         title: testNotificationTitle || 'Notificación de Prueba',
         body: testNotificationBody || 'Esta es una notificación de prueba para verificar la configuración.',
         icon: '/erick-go-logo.png'
       };
 
-      // 2. Lo enviamos en el cuerpo de la petición, JSON.stringify solo una vez
       const response = await fetch('/.netlify/functions/send-notification', {
         method: 'POST',
         headers: {
@@ -129,7 +195,7 @@ export default function NotificationSettings() {
         },
         body: JSON.stringify({
           clientId: selectedClientId,
-          payload: notificationPayload, // <-- PASAMOS EL OBJETO DIRECTAMENTE
+          payload: notificationPayload,
         })
       });
       
@@ -149,9 +215,6 @@ export default function NotificationSettings() {
       setLoading(false);
     }
   };
-  // =================================================================
-  // FIN DE LA FUNCIÓN CORREGIDA
-  // =================================================================
 
   return (
     <Box sx={{ p: 3 }}>
@@ -204,48 +267,65 @@ export default function NotificationSettings() {
               />
             </Grid>
             
-            <Grid item xs={12} md={4}>
+            {/* NUEVO CAMPO DE HORA DE INICIO EN FORMATO 12H */}
+            <Grid item xs={12} sm={6} md={3}>
               <TextField
                 label="Hora de inicio"
-                type="time"
-                value={notificationConfig.attendanceReminderStartTime}
-                onChange={(e) => handleConfigChange('attendanceReminderStartTime', e.target.value)}
+                value={notificationConfig.attendanceReminderStartTime.time}
+                onChange={(e) => handleTimeChange('attendanceReminderStartTime', e.target.value)}
                 disabled={!notificationConfig.enableNotifications || !notificationConfig.enableAttendanceReminder}
                 fullWidth
                 margin="normal"
-                InputLabelProps={{
-                  shrink: true,
-                }}
-                helperText="A partir de qué hora enviar recordatorios"
+                placeholder="hh:mm"
               />
             </Grid>
-            
-            <Grid item xs={12} md={4}>
-              <TextField
-                label="Hora de fin"
-                type="time"
-                value={notificationConfig.attendanceReminderEndTime}
-                onChange={(e) => handleConfigChange('attendanceReminderEndTime', e.target.value)}
+            <Grid item xs={12} sm={6} md={2}>
+              <Select
+                value={notificationConfig.attendanceReminderStartTime.ampm}
+                onChange={(e) => handleAmPmChange('attendanceReminderStartTime', e.target.value)}
                 disabled={!notificationConfig.enableNotifications || !notificationConfig.enableAttendanceReminder}
                 fullWidth
-                margin="normal"
-                InputLabelProps={{
-                  shrink: true,
-                }}
-                helperText="Hasta qué hora enviar recordatorios"
-              />
+                sx={{ mt: 2, height: '56px' }} // Alinear con el TextField
+              >
+                <MenuItem value="AM">AM</MenuItem>
+                <MenuItem value="PM">PM</MenuItem>
+              </Select>
             </Grid>
 
-            <Grid item xs={12} md={4}>
+            {/* NUEVO CAMPO DE HORA DE FIN EN FORMATO 12H */}
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                label="Hora de fin"
+                value={notificationConfig.attendanceReminderEndTime.time}
+                onChange={(e) => handleTimeChange('attendanceReminderEndTime', e.target.value)}
+                disabled={!notificationConfig.enableNotifications || !notificationConfig.enableAttendanceReminder}
+                fullWidth
+                margin="normal"
+                placeholder="hh:mm"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={2}>
+              <Select
+                value={notificationConfig.attendanceReminderEndTime.ampm}
+                onChange={(e) => handleAmPmChange('attendanceReminderEndTime', e.target.value)}
+                disabled={!notificationConfig.enableNotifications || !notificationConfig.enableAttendanceReminder}
+                fullWidth
+                sx={{ mt: 2, height: '56px' }} // Alinear con el TextField
+              >
+                <MenuItem value="AM">AM</MenuItem>
+                <MenuItem value="PM">PM</MenuItem>
+              </Select>
+            </Grid>
+
+            <Grid item xs={12} sm={6} md={2}>
               <TextField
                 label="Frecuencia (minutos)"
                 type="number"
                 value={notificationConfig.attendanceReminderFrequency}
-                onChange={(e) => handleConfigChange('attendanceReminderFrequency', parseInt(e.target.value))}
+                onChange={(e) => handleConfigChange('attendanceReminderFrequency', parseInt(e.target.value, 10) || 0)}
                 disabled={!notificationConfig.enableNotifications || !notificationConfig.enableAttendanceReminder}
                 fullWidth
                 margin="normal"
-                helperText="Cada cuántos minutos se repetirá el recordatorio"
               />
             </Grid>
           </Grid>
