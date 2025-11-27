@@ -1,4 +1,4 @@
-// netlify/functions/send-attendance-reminder.js (VERSIÓN COMPLETA Y CORREGIDA)
+// netlify/functions/send-attendance-reminder.js (VERSIÓN FINAL CON ZONA HORARIA)
 
 const webPush = require('web-push');
 const admin = require('firebase-admin');
@@ -42,7 +42,6 @@ async function getNotificationConfig(clientId) {
   console.log(`[DEBUG] getNotificationConfig llamado para clientId: ${clientId}`);
   try {
     const db = admin.firestore();
-    // CORRECCIÓN: Se lee directamente el documento de configuración
     const notificacionesDoc = await db.collection('clientes').doc(clientId)
       .collection('configuracion').doc('notificaciones')
       .get();
@@ -84,7 +83,6 @@ async function getEmployeesNeedingReminder(clientId) {
     
     console.log(`[DEBUG] Rango de fecha: ${today.toISOString()} a ${tomorrow.toISOString()}`);
     
-    // 1. Obtener todos los usuarios de tipo empleado para este cliente
     const vinculosSnapshot = await db.collection('vinculos')
       .where('clientId', '==', clientId)
       .where('rol', '==', 'empleado')
@@ -100,7 +98,6 @@ async function getEmployeesNeedingReminder(clientId) {
       return [];
     }
     
-    // 2. Obtener las asistencias de hoy
     const asistenciasSnapshot = await db.collection('asistencias')
       .where('clientId', '==', clientId)
       .where('fecha', '>=', admin.firestore.Timestamp.fromDate(today))
@@ -114,17 +111,14 @@ async function getEmployeesNeedingReminder(clientId) {
     });
     console.log(`[DEBUG] IDs de empleados con asistencia registrada:`, Array.from(employeeIdsWithAttendance));
     
-    // 3. CORRECCIÓN: Activamos la lógica de opt-out para respetar la elección del usuario.
     const optedOutUserIds = new Set();
     console.log('[DEBUG] Buscando usuarios que han optado por no usar transporte hoy...');
 
-    // Obtenemos las suscripciones para ver quién ha hecho opt-out hoy
     const suscripcionesSnapshot = await db.collection('suscripciones')
       .where('clientId', '==', clientId)
       .where('dailyOptOut', '==', true)
       .get();
 
-    // Verificamos que la fecha de opt-out sea hoy
     suscripcionesSnapshot.forEach(doc => {
       const data = doc.data();
       if (data.dailyOptOutDate && data.dailyOptOutDate.toDate().toDateString() === today.toDateString()) {
@@ -134,7 +128,6 @@ async function getEmployeesNeedingReminder(clientId) {
 
     console.log(`[DEBUG] Usuarios que han optado por salir hoy:`, Array.from(optedOutUserIds));
     
-    // 4. Filtrar empleados que no tienen asistencia y no han optado por salir
     const employeesNeedingReminder = employeeIds.filter(id => 
       !employeeIdsWithAttendance.has(id) && !optedOutUserIds.has(id)
     );
@@ -215,10 +208,20 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
   }
 }
 
-// Función para verificar si la hora actual está dentro del rango de recordatorios
+// --- FUNCIÓN CLAVE CORREGIDA: Ahora considera la zona horaria ---
 function isWithinReminderRange(startTime, endTime) {
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  // 1. Obtener la hora actual UTC
+  const nowUTC = new Date();
+  console.log(`[DEBUG] Hora actual en el servidor (UTC): ${nowUTC.toISOString()}`);
+
+  // 2. Ajustar a la zona horaria local (Venezuela, UTC-4)
+  // IMPORTANTE: Si tu empresa está en otra zona horaria, cambia este valor.
+  const offsetHours = -4; 
+  const nowLocal = new Date(nowUTC.getTime() + (offsetHours * 60 * 60 * 1000));
+  console.log(`[DEBUG] Hora ajustada a la zona local (UTC${offsetHours}): ${nowLocal.toISOString()}`);
+  
+  const currentMinutes = nowLocal.getHours() * 60 + nowLocal.getMinutes();
+  console.log(`[DEBUG] Hora actual en minutos para la comprobación: ${currentMinutes}`);
   
   const [startHour, startMinute] = startTime.split(':').map(Number);
   const [endHour, endMinute] = endTime.split(':').map(Number);
@@ -226,20 +229,21 @@ function isWithinReminderRange(startTime, endTime) {
   const startMinutes = startHour * 60 + startMinute;
   const endMinutes = endHour * 60 + endMinute;
   
+  let isInRange;
   if (startMinutes > endMinutes) {
-    const isInRange = currentMinutes >= startMinutes || currentMinutes <= endMinutes;
-    console.log(`[DEBUG] Verificación de hora (cruce medianoche): Hora actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
-    return isInRange;
+    isInRange = currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+    console.log(`[DEBUG] Verificación de hora (cruce medianoche): Actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
   } else {
-    const isInRange = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
-    console.log(`[DEBUG] Verificación de hora: Hora actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
-    return isInRange;
+    isInRange = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    console.log(`[DEBUG] Verificación de hora: Actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
   }
+  
+  return isInRange;
 }
 
 exports.handler = async function (event, context) {
-  console.log('=== INICIO send-attendance-reminder (VERSIÓN DEFINITIVA) ===');
-  console.log(`[DEBUG] Hora de ejecución del servidor: ${new Date().toISOString()}`);
+  console.log('=== INICIO send-attendance-reminder (VERSIÓN CON ZONA HORARIA) ===');
+  console.log(`[DEBUG] Hora de ejecución del servidor (UTC): ${new Date().toISOString()}`);
   
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || 
       !process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
@@ -285,8 +289,10 @@ exports.handler = async function (event, context) {
         continue;
       }
       
-      const now = new Date();
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      const nowUTC = new Date();
+      const offsetHours = -4; // Mismo offset que en la función de comprobación
+      const nowLocal = new Date(nowUTC.getTime() + (offsetHours * 60 * 60 * 1000));
+      const currentMinutes = nowLocal.getHours() * 60 + nowLocal.getMinutes();
       
       const frequencyInMinutes = config.attendanceReminderFrequency || 30;
       const shouldRun = currentMinutes % frequencyInMinutes === 0;
@@ -339,7 +345,7 @@ exports.handler = async function (event, context) {
       }
     }
     
-    console.log('=== FIN send-attendance-reminder (VERSIÓN DEFINITIVA) ===');
+    console.log('=== FIN send-attendance-reminder (VERSIÓN CON ZONA HORARIA) ===');
     return {
       statusCode: 200,
       body: JSON.stringify({ 
