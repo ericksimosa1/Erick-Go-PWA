@@ -1,4 +1,4 @@
-// netlify/functions/send-attendance-reminder.js (VERSIÓN CORREGIDA)
+// netlify/functions/send-attendance-reminder.js (VERSIÓN COMPLETA Y CORREGIDA)
 
 const webPush = require('web-push');
 const admin = require('firebase-admin');
@@ -37,21 +37,20 @@ if (!admin.apps.length) {
   }
 }
 
-// FUNCIÓN CORREGIDA: Ahora busca en la subcolección 'notificaciones'
+// --- FUNCIÓN CORREGIDA: Ahora busca en el lugar correcto ---
 async function getNotificationConfig(clientId) {
   console.log(`[DEBUG] getNotificationConfig llamado para clientId: ${clientId}`);
   try {
     const db = admin.firestore();
-    const notificacionesSnapshot = await db.collection('clientes').doc(clientId)
+    // CORRECCIÓN: Se lee directamente el documento de configuración
+    const notificacionesDoc = await db.collection('clientes').doc(clientId)
       .collection('configuracion').doc('notificaciones')
-      .collection('notificaciones')
-      .limit(1) // Solo necesitamos el primer documento que encontremos
       .get();
     
-    if (!notificacionesSnapshot.empty) {
-      const configDoc = notificacionesSnapshot.docs[0];
-      console.log(`[DEBUG] Configuración encontrada para ${clientId} en el documento ${configDoc.id}:`, configDoc.data());
-      return configDoc.data();
+    if (notificacionesDoc.exists) {
+      const config = notificacionesDoc.data();
+      console.log(`[DEBUG] Configuración encontrada para ${clientId}:`, config);
+      return config;
     }
     
     console.log(`[DEBUG] No se encontró configuración para ${clientId}. Usando configuración por defecto.`);
@@ -73,7 +72,7 @@ async function getNotificationConfig(clientId) {
   }
 }
 
-// Función para obtener empleados sin registrar asistencia hoy y que no han optado por salir
+// --- FUNCIÓN CORREGIDA: Ahora respeta la opción "No Usar Transporte Hoy" ---
 async function getEmployeesNeedingReminder(clientId) {
   console.log(`[DEBUG] getEmployeesNeedingReminder llamado para clientId: ${clientId}`);
   try {
@@ -115,10 +114,25 @@ async function getEmployeesNeedingReminder(clientId) {
     });
     console.log(`[DEBUG] IDs de empleados con asistencia registrada:`, Array.from(employeeIdsWithAttendance));
     
-    // 3. NOTA: La sección de "opt-out" está desactivada porque los campos no existen en tu base de datos.
-    // Esto no causará errores, simplemente no filtrará a nadie por esta razón.
+    // 3. CORRECCIÓN: Activamos la lógica de opt-out para respetar la elección del usuario.
     const optedOutUserIds = new Set();
-    console.log('[DEBUG] Los campos dailyOptOut y dailyOptOutDate no existen. La función de opt-out está desactivada.');
+    console.log('[DEBUG] Buscando usuarios que han optado por no usar transporte hoy...');
+
+    // Obtenemos las suscripciones para ver quién ha hecho opt-out hoy
+    const suscripcionesSnapshot = await db.collection('suscripciones')
+      .where('clientId', '==', clientId)
+      .where('dailyOptOut', '==', true)
+      .get();
+
+    // Verificamos que la fecha de opt-out sea hoy
+    suscripcionesSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.dailyOptOutDate && data.dailyOptOutDate.toDate().toDateString() === today.toDateString()) {
+        optedOutUserIds.add(data.userId);
+      }
+    });
+
+    console.log(`[DEBUG] Usuarios que han optado por salir hoy:`, Array.from(optedOutUserIds));
     
     // 4. Filtrar empleados que no tienen asistencia y no han optado por salir
     const employeesNeedingReminder = employeeIds.filter(id => 
@@ -275,8 +289,6 @@ exports.handler = async function (event, context) {
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
       
       const frequencyInMinutes = config.attendanceReminderFrequency || 30;
-      // Lógica de frecuencia: La función se ejecuta cada 5 minutos por cron.
-      // Esta línea asegura que solo se envíe si el minuto actual es un múltiplo de la frecuencia.
       const shouldRun = currentMinutes % frequencyInMinutes === 0;
       console.log(`[DEBUG] Verificación de frecuencia: Minutos actuales=${currentMinutes}, Frecuencia=${frequencyInMinutes}, DebeEjecutarse=${shouldRun}`);
       
