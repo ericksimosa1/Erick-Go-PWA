@@ -1,6 +1,5 @@
-// sw.js
+// public/sw.js
 
-// --- LÓGICA DE CACHÉ (PWA) ---
 const CACHE_NAME = 'erick-go-cache-v5';
 const urlsToCache = [
   '/',
@@ -41,9 +40,9 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.url.includes('firebaseio.com') || 
-      event.request.url.includes('firestore.googleapis.com') ||
-      event.request.url.includes('googleapis.com')) {
+  // NO INTERCEPTAR PETICIONES A FUNCIONES DE NETLIFY EN MODO DESARROLLO
+  if (event.request.url.includes('localhost:5173') || 
+      event.request.url.includes('.netlify/functions')) {
     return;
   }
 
@@ -82,7 +81,7 @@ self.addEventListener('push', event => {
     icon: '/erick-go-logo.png',
     badge: '/erick-go-logo.png',
     data: {
-      url: '/',
+      url: '/login',
       primaryKey: 1
     }
   };
@@ -139,6 +138,15 @@ self.addEventListener('notificationclick', event => {
         console.error('Faltan userId o clientId en los datos de la notificación para opt-out.');
         event.waitUntil(clients.openWindow('/login'));
         return;
+    }
+
+    // EN MODO DESARROLLO, SIMULAMOS LA LLAMADA A LA FUNCIÓN
+    if (self.location.hostname === 'localhost') {
+      console.log('Modo desarrollo: Simulando opt-out para userId:', userId, 'clientId:', clientId);
+      event.waitUntil(
+        clients.openWindow('/login')
+      );
+      return;
     }
 
     event.waitUntil(

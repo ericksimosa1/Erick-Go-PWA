@@ -1,4 +1,4 @@
-// src/components/NotificationSettings.jsx (VERSIÓN CORREGIDA CON FORMATO 12H)
+// src/components/NotificationSettings.jsx (VERSIÓN DEFINITIVA CORREGIDA)
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -9,37 +9,6 @@ import {
 import { Save as SaveIcon, Schedule as ScheduleIcon, NotificationsActive as NotificationsActiveIcon } from '@mui/icons-material';
 import { useAuthStore } from '../store/authStore';
 
-// --- FUNCIONES AUXILIARES PARA CONVERSIÓN DE HORA ---
-
-// Función para convertir hora de 24h a 12h con AM/PM
-const convertTo12HourFormat = useCallback((time24) => {
-    if (!time24) return { time: '12:00', ampm: 'AM' };
-    const [hours, minutes] = time24.split(':');
-    let hoursNum = parseInt(hours, 10);
-    const minutesNum = parseInt(minutes, 10);
-    const period = hoursNum >= 12 ? 'PM' : 'AM';
-    hoursNum = hoursNum % 12 || 12;
-    const formattedHours = hoursNum.toString().padStart(2, '0');
-    const formattedMinutes = minutesNum.toString().padStart(2, '0');
-    return { time: `${formattedHours}:${formattedMinutes}`, ampm: period };
-}, []);
-
-// Función para convertir hora de 12h a 24h
-const convertTo24HourFormat = useCallback((time12, ampm) => {
-    if (!time12) return '';
-    const [hours, minutes] = time12.split(':');
-    let hoursNum = parseInt(hours, 10);
-    if (ampm === 'PM' && hoursNum < 12) {
-        hoursNum += 12;
-    } else if (ampm === 'AM' && hoursNum === 12) {
-        hoursNum = 0;
-    }
-    const formattedHours = hoursNum.toString().padStart(2, '0');
-    const formattedMinutes = minutes.toString().padStart(2, '0');
-    return `${formattedHours}:${formattedMinutes}`;
-}, []);
-
-
 export default function NotificationSettings() {
   const { selectedClientId } = useAuthStore();
   
@@ -49,7 +18,7 @@ export default function NotificationSettings() {
     
     // Recordatorios de asistencia (CAMBIADO a objeto 12h)
     enableAttendanceReminder: true,
-    attendanceReminderStartTime: { time: '07:00', ampm: 'PM' }, 
+    attendanceReminderStartTime: { time: '07:00', ampm: 'AM' }, 
     attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },   
     attendanceReminderFrequency: 30,       
     
@@ -68,6 +37,35 @@ export default function NotificationSettings() {
   const [testNotificationTitle, setTestNotificationTitle] = useState('');
   const [testNotificationBody, setTestNotificationBody] = useState('');
 
+  // --- FUNCIONES AUXILIARES DENTRO DEL COMPONENTE ---
+  // Función para convertir hora de 24h a 12h con AM/PM
+  const convertTo12HourFormat = useCallback((time24) => {
+      if (!time24) return { time: '12:00', ampm: 'AM' };
+      const [hours, minutes] = time24.split(':');
+      let hoursNum = parseInt(hours, 10);
+      const minutesNum = parseInt(minutes, 10);
+      const period = hoursNum >= 12 ? 'PM' : 'AM';
+      hoursNum = hoursNum % 12 || 12;
+      const formattedHours = hoursNum.toString().padStart(2, '0');
+      const formattedMinutes = minutesNum.toString().padStart(2, '0');
+      return { time: `${formattedHours}:${formattedMinutes}`, ampm: period };
+  }, []);
+
+  // Función para convertir hora de 12h a 24h
+  const convertTo24HourFormat = useCallback((time12, ampm) => {
+      if (!time12) return '';
+      const [hours, minutes] = time12.split(':');
+      let hoursNum = parseInt(hours, 10);
+      if (ampm === 'PM' && hoursNum < 12) {
+          hoursNum += 12;
+      } else if (ampm === 'AM' && hoursNum === 12) {
+          hoursNum = 0;
+      }
+      const formattedHours = hoursNum.toString().padStart(2, '0');
+      const formattedMinutes = minutes.toString().padStart(2, '0');
+      return `${formattedHours}:${formattedMinutes}`;
+  }, []);
+
   // Cargar configuración al montar el componente o al cambiar de empresa
   useEffect(() => {
     if (selectedClientId) {
@@ -77,7 +75,7 @@ export default function NotificationSettings() {
         setNotificationConfig({
             enableNotifications: true,
             enableAttendanceReminder: true,
-            attendanceReminderStartTime: { time: '07:00', ampm: 'PM' },
+            attendanceReminderStartTime: { time: '07:00', ampm: 'AM' },
             attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },
             attendanceReminderFrequency: 30,
             enableClosingReminder: true,
@@ -91,6 +89,15 @@ export default function NotificationSettings() {
     try {
       setLoading(true);
       setError('');
+      
+      // VERIFICACIÓN EXPLÍCITA DE MODO DESARROLLO
+      const isDevelopment = import.meta.env.DEV;
+      console.log('Modo desarrollo:', isDevelopment);
+      
+      if (isDevelopment) {
+        console.log('Modo desarrollo: Omitiendo carga de configuración desde el backend');
+        return;
+      }
       
       const response = await fetch(`/.netlify/functions/get-notification-config?clientId=${selectedClientId}`);
       
@@ -117,7 +124,10 @@ export default function NotificationSettings() {
       
     } catch (error) {
       console.error('Error al cargar configuración de notificaciones:', error);
-      setError('Error al cargar la configuración de notificaciones.');
+      // SOLO MOSTRAR ERROR SI NO ESTAMOS EN MODO DESARROLLO
+      if (!import.meta.env.DEV) {
+        setError('Error al cargar la configuración de notificaciones.');
+      }
     } finally {
       setLoading(false);
     }
@@ -143,6 +153,17 @@ export default function NotificationSettings() {
     try {
       setLoading(true);
       setError('');
+      
+      // VERIFICACIÓN EXPLÍCITA DE MODO DESARROLLO
+      const isDevelopment = import.meta.env.DEV;
+      console.log('Modo desarrollo:', isDevelopment);
+      
+      if (isDevelopment) {
+        console.log('Modo desarrollo: Omitiendo guardado de configuración en el backend');
+        setSuccessMessage('Configuración guardada (simulado en modo desarrollo)');
+        setTimeout(() => setSuccessMessage(''), 3000);
+        return;
+      }
       
       // CONVERSIÓN: Convertimos las horas de 12h de la UI a 24h para el backend
       const payloadToSave = {
@@ -182,6 +203,20 @@ export default function NotificationSettings() {
       setLoading(true);
       setError('');
       
+      // VERIFICACIÓN EXPLÍCITA DE MODO DESARROLLO
+      const isDevelopment = import.meta.env.DEV;
+      console.log('Modo desarrollo:', isDevelopment);
+      
+      if (isDevelopment) {
+        console.log('Modo desarrollo: Omitiendo envío de notificación de prueba');
+        setSuccessMessage('Notificación de prueba enviada (simulado en modo desarrollo)');
+        setOpenTestDialog(false);
+        setTestNotificationTitle('');
+        setTestNotificationBody('');
+        setTimeout(() => setSuccessMessage(''), 3000);
+        return;
+      }
+      
       const notificationPayload = {
         title: testNotificationTitle || 'Notificación de Prueba',
         body: testNotificationBody || 'Esta es una notificación de prueba para verificar la configuración.',
@@ -210,7 +245,7 @@ export default function NotificationSettings() {
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error) {
       console.error('Error al enviar notificación de prueba:', error);
-      setError('Error al enviar la notificación de prueba. Revisa la consola para más detalles.');
+      setError('Error al enviar notificación de prueba. Revisa la consola para más detalles.');
     } finally {
       setLoading(false);
     }
@@ -222,6 +257,12 @@ export default function NotificationSettings() {
         <NotificationsActiveIcon sx={{ mr: 1 }} />
         Configuración de Notificaciones
       </Typography>
+      
+      {import.meta.env.DEV && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Estás en modo desarrollo. Las funciones de backend están simuladas.
+        </Alert>
+      )}
       
       {successMessage && <Alert severity="success" sx={{ mb: 2 }}>{successMessage}</Alert>}
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

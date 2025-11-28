@@ -1,4 +1,4 @@
-// netlify/functions/send-attendance-reminder.js (VERSIÓN FINAL CON ZONA HORARIA)
+// netlify/functions/send-attendance-reminder.js (VERSIÓN FINAL CORREGIDA)
 
 const webPush = require('web-push');
 const admin = require('firebase-admin');
@@ -37,7 +37,7 @@ if (!admin.apps.length) {
   }
 }
 
-// --- FUNCIÓN CORREGIDA: Ahora busca en el lugar correcto ---
+// --- FUNCIÓN CORREGIDA: Ahora busca en el lugar correcto y maneja el nuevo formato de hora ---
 async function getNotificationConfig(clientId) {
   console.log(`[DEBUG] getNotificationConfig llamado para clientId: ${clientId}`);
   try {
@@ -57,10 +57,10 @@ async function getNotificationConfig(clientId) {
       enableNotifications: true,
       enableAttendanceReminder: true,
       attendanceReminderFrequency: 30,
-      attendanceReminderStartTime: '07:00',
-      attendanceReminderEndTime: '10:00',
+      attendanceReminderStartTime: { time: '07:00', ampm: 'AM' }, // <-- CORRECCIÓN: Nuevo formato
+      attendanceReminderEndTime: { time: '10:00', ampm: 'PM' },   // <-- CORRECCIÓN: Nuevo formato
       enableClosingReminder: true,
-      closingReminderTime: '18:00',
+      closingReminderTime: { time: '06:00', ampm: 'PM' },   // <-- CORRECCIÓN: Nuevo formato
       enableTripNotifications: true,
       batchSize: 10,
       retryAttempts: 3
@@ -140,7 +140,7 @@ async function getEmployeesNeedingReminder(clientId) {
   }
 }
 
-// Función para enviar notificaciones a usuarios (CORREGIDA)
+// Función para enviar notificaciones a usuarios (CORREGIDA Y MEJORADA)
 async function sendNotificationsToUsers(userIds, payload, clientId) {
   console.log(`[DEBUG] sendNotificationsToUsers llamado para ${userIds.length} usuarios.`);
   try {
@@ -152,16 +152,22 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
     const db = admin.firestore();
     const results = [];
     
+    // Optimización: obtener todas las suscripciones en una sola consulta
+    const suscripcionesSnapshot = await db.collection('suscripciones')
+      .where('clientId', '==', clientId)
+      .where(admin.firestore.FieldPath.documentId(), 'in', userIds)
+      .get();
+    
+    const suscripcionesMap = new Map();
+    suscripcionesSnapshot.forEach(doc => {
+      const data = doc.data();
+      suscripcionesMap.set(doc.id, data.subscription);
+    });
+    
     for (const userId of userIds) {
       console.log(`[DEBUG] Procesando notificación para el usuario: ${userId}`);
-      const doc = await db.collection('suscripciones').doc(userId).get();
-      if (!doc.exists) {
-        console.log(`[DEBUG] No se encontró suscripción para el usuario: ${userId}`);
-        results.push({ userId, success: false, error: 'Suscripción no encontrada' });
-        continue;
-      }
-
-      const subscription = doc.data().subscription;
+      
+      const subscription = suscripcionesMap.get(userId);
       
       if (!subscription || !subscription.endpoint) {
         console.log(`[DEBUG] Suscripción inválida para el usuario: ${userId}`);
@@ -169,6 +175,7 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
         continue;
       }
       
+      // CORRECCIÓN: Asegurarnos de incluir userId y clientId en los datos de la notificación
       const personalizedPayload = {
         ...payload,
         data: {
@@ -208,14 +215,13 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
   }
 }
 
-// --- FUNCIÓN CLAVE CORREGIDA: Ahora considera la zona horaria ---
+// --- FUNCIÓN CLAVE CORREGIDA: Ahora considera la zona horaria y el nuevo formato de hora ---
 function isWithinReminderRange(startTime, endTime) {
   // 1. Obtener la hora actual UTC
   const nowUTC = new Date();
   console.log(`[DEBUG] Hora actual en el servidor (UTC): ${nowUTC.toISOString()}`);
 
   // 2. Ajustar a la zona horaria local (Venezuela, UTC-4)
-  // IMPORTANTE: Si tu empresa está en otra zona horaria, cambia este valor.
   const offsetHours = -4; 
   const nowLocal = new Date(nowUTC.getTime() + (offsetHours * 60 * 60 * 1000));
   console.log(`[DEBUG] Hora ajustada a la zona local (UTC${offsetHours}): ${nowLocal.toISOString()}`);
@@ -223,8 +229,29 @@ function isWithinReminderRange(startTime, endTime) {
   const currentMinutes = nowLocal.getHours() * 60 + nowLocal.getMinutes();
   console.log(`[DEBUG] Hora actual en minutos para la comprobación: ${currentMinutes}`);
   
-  const [startHour, startMinute] = startTime.split(':').map(Number);
-  const [endHour, endMinute] = endTime.split(':').map(Number);
+  // CORRECCIÓN: Manejar el nuevo formato de hora (objeto con time y ampm)
+  let startHour, startMinute, endHour, endMinute;
+  
+  if (typeof startTime === 'object' && startTime.time) {
+    // Nuevo formato: objeto con time y ampm
+    const [startHours, startMinutes] = startTime.time.split(':').map(Number);
+    const [endHours, endMinutes] = endTime.time.split(':').map(Number);
+    
+    // Convertir a formato 24h
+    startHour = startTime.ampm === 'PM' && startHours < 12 ? startHours + 12 : startHours;
+    startMinute = startMinutes;
+    endHour = endTime.ampm === 'PM' && endHours < 12 ? endHours + 12 : endHours;
+    endMinute = endMinutes;
+  } else {
+    // Formato antiguo: cadena "HH:MM"
+    const [startHours, startMinutes] = startTime.split(':').map(Number);
+    const [endHours, endMinutes] = endTime.split(':').map(Number);
+    
+    startHour = startHours;
+    startMinute = startMinutes;
+    endHour = endHours;
+    endMinute = endMinutes;
+  }
   
   const startMinutes = startHour * 60 + startMinute;
   const endMinutes = endHour * 60 + endMinute;
@@ -242,7 +269,7 @@ function isWithinReminderRange(startTime, endTime) {
 }
 
 exports.handler = async function (event, context) {
-  console.log('=== INICIO send-attendance-reminder (VERSIÓN CON ZONA HORARIA) ===');
+  console.log('=== INICIO send-attendance-reminder (VERSIÓN FINAL CORREGIDA) ===');
   console.log(`[DEBUG] Hora de ejecución del servidor (UTC): ${new Date().toISOString()}`);
   
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || 
@@ -345,7 +372,7 @@ exports.handler = async function (event, context) {
       }
     }
     
-    console.log('=== FIN send-attendance-reminder (VERSIÓN CON ZONA HORARIA) ===');
+    console.log('=== FIN send-attendance-reminder (VERSIÓN FINAL CORREGIDA) ===');
     return {
       statusCode: 200,
       body: JSON.stringify({ 

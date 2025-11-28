@@ -1,4 +1,5 @@
 // src/App.jsx
+
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
@@ -10,6 +11,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import EmployeeDashboard from './pages/EmployeeDashboard';
 import DriverDashboard from './pages/DriverDashboard';
 import MainLayout from './components/MainLayout';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // --- TEMA DE LA APLICACIÓN ---
 const erickGoTheme = createTheme({
@@ -46,6 +48,13 @@ function AppContent() {
             return;
         }
         console.log(`Actualizando estado de recordatorio a: ${action} para el usuario: ${user.uid}`);
+        
+        // SOLO INTENTAR LLAMAR A LA FUNCIÓN SI NO ESTAMOS EN MODO DESARROLLO
+        if (import.meta.env.DEV) {
+            console.log('Modo desarrollo: Omitiendo llamada a update-reminder-status');
+            return;
+        }
+        
         try {
             await fetch('/.netlify/functions/update-reminder-status', {
                 method: 'POST',
@@ -166,7 +175,14 @@ function AppContent() {
             }
             
             setSubscription(subscription);
-            await saveSubscriptionToBackend(subscription);
+            
+            // SOLO GUARDAR LA SUSCRIPCIÓN SI NO ESTAMOS EN MODO DESARROLLO
+            if (!import.meta.env.DEV) {
+                await saveSubscriptionToBackend(subscription);
+            } else {
+                console.log('Modo desarrollo: Omitiendo guardado de suscripción en el backend');
+            }
+            
             console.log('Usuario suscrito a notificaciones push.');
             setSubscriptionError('');
         } catch (error) {
@@ -275,11 +291,12 @@ function App() {
         <ThemeProvider theme={erickGoTheme}>
             <CssBaseline />
             <Router>
-                <AppContent />
+                <ErrorBoundary>
+                    <AppContent />
+                </ErrorBoundary>
             </Router>
         </ThemeProvider>
     );
 }
 
-// ESTA ES LA LÍNEA CLAVE QUE FALTABA
 export default App;
