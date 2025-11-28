@@ -19,6 +19,34 @@ if (!admin.apps.length) {
   }
 }
 
+// Configuraciones por defecto específicas para cada empresa
+const DEFAULT_CONFIGS = {
+  'irjKu853x42zZc1hcRW6': { // Croii Soledad
+    enableNotifications: true,
+    enableAttendanceReminder: true,
+    attendanceReminderStartTime: '14:00', // 2:00 PM en formato 24h
+    attendanceReminderEndTime: '22:30',   // 10:30 PM en formato 24h
+    attendanceReminderFrequency: 5,
+    enableClosingReminder: true,
+    closingReminderTime: '18:00', // 6:00 PM en formato 24h
+    enableTripNotifications: true,
+    batchSize: 10,
+    retryAttempts: 3
+  },
+  'yAPjLzpN1bRyX5k5ljhZ': { // Croii Aviadores
+    enableNotifications: true,
+    enableAttendanceReminder: true,
+    attendanceReminderStartTime: '12:00', // 12:00 PM en formato 24h
+    attendanceReminderEndTime: '20:00',   // 8:00 PM en formato 24h
+    attendanceReminderFrequency: 5,
+    enableClosingReminder: true,
+    closingReminderTime: '20:00', // 8:00 PM en formato 24h
+    enableTripNotifications: true,
+    batchSize: 10,
+    retryAttempts: 3
+  }
+};
+
 exports.handler = async function (event, context) {
   console.log('=== INICIO get-notification-config ===');
   
@@ -53,16 +81,14 @@ exports.handler = async function (event, context) {
       config = doc.data();
       console.log(`Configuración de notificaciones encontrada para cliente: ${clientId}`);
     } else {
-      console.log(`No se encontró configuración de notificaciones para cliente: ${clientId}. Se devolverá una configuración por defecto.`);
-      // Devolvemos una configuración por defecto si no existe una personalizada
-      config = {
+      console.log(`No se encontró configuración de notificaciones para cliente: ${clientId}. Se devolverá una configuración por defecto específica.`);
+      // Devolvemos una configuración por defecto específica para cada empresa
+      config = DEFAULT_CONFIGS[clientId] || {
         enableNotifications: true,
-        enableAttendanceReminder: true, // <-- CORRECCIÓN: Asegurar que sea true por defecto
-        attendanceReminderStartTime: '09:00', // <-- CORRECCIÓN: Formato 24h
-        attendanceReminderEndTime: '22:00',   // <-- CORRECCIÓN: Formato 24h
-        attendanceReminderFrequency: 30,
+        enableAttendanceReminder: true,
+        attendanceReminderTime: '07:00',
         enableClosingReminder: true,
-        closingReminderTime: '18:00', // <-- CORRECCIÓN: Formato 24h
+        closingReminderTime: '18:00',
         enableTripNotifications: true,
         batchSize: 10,
         retryAttempts: 3

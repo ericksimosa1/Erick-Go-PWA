@@ -1,4 +1,4 @@
-// src/components/NotificationSettings.jsx (VERSIÓN CORREGIDA CON MANEJO DE HORA)
+// src/components/NotificationSettings.jsx (VERSIÓN CORREGIDA CON MANEJO DE EMPRESAS)
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -8,6 +8,30 @@ import {
 } from '@mui/material';
 import { Save as SaveIcon, Schedule as ScheduleIcon, NotificationsActive as NotificationsActiveIcon } from '@mui/icons-material';
 import { useAuthStore } from '../store/authStore';
+
+// Configuraciones por defecto específicas para cada empresa
+const DEFAULT_CONFIGS = {
+  'irjKu853x42zZc1hcRW6': { // Croii Soledad
+    enableNotifications: true,
+    enableAttendanceReminder: true,
+    attendanceReminderStartTime: { time: '02:00', ampm: 'PM' }, 
+    attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },   
+    attendanceReminderFrequency: 5,
+    enableClosingReminder: true,
+    closingReminderTime: { time: '06:00', ampm: 'PM' },
+    enableTripNotifications: true,
+  },
+  'yAPjLzpN1bRyX5k5ljhZ': { // Croii Aviadores
+    enableNotifications: true,
+    enableAttendanceReminder: true,
+    attendanceReminderStartTime: { time: '12:00', ampm: 'PM' }, 
+    attendanceReminderEndTime: { time: '08:00', ampm: 'PM' },   
+    attendanceReminderFrequency: 5,
+    enableClosingReminder: true,
+    closingReminderTime: { time: '08:00', ampm: 'PM' },
+    enableTripNotifications: true,
+  }
+};
 
 export default function NotificationSettings() {
   const { selectedClientId } = useAuthStore();
@@ -20,7 +44,7 @@ export default function NotificationSettings() {
     enableAttendanceReminder: true,
     attendanceReminderStartTime: { time: '07:00', ampm: 'AM' }, 
     attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },   
-    attendanceReminderFrequency: 30,       
+    attendanceReminderFrequency: 30,        
     
     // Recordatorios de cierre (CAMBIADO a objeto 12h)
     enableClosingReminder: true,
@@ -83,19 +107,19 @@ export default function NotificationSettings() {
     if (selectedClientId) {
       loadNotificationConfig();
     } else {
-        // Resetear configuración si no hay cliente seleccionado
-        setNotificationConfig({
-            enableNotifications: true,
-            enableAttendanceReminder: true,
-            attendanceReminderStartTime: { time: '07:00', ampm: 'AM' },
-            attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },
-            attendanceReminderFrequency: 30,
-            enableClosingReminder: true,
-            closingReminderTime: { time: '06:00', ampm: 'PM' },
-            enableTripNotifications: true,
-        });
+      // Resetear configuración si no hay cliente seleccionado
+      setNotificationConfig({
+        enableNotifications: true,
+        enableAttendanceReminder: true,
+        attendanceReminderStartTime: { time: '07:00', ampm: 'AM' },
+        attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },
+        attendanceReminderFrequency: 30,
+        enableClosingReminder: true,
+        closingReminderTime: { time: '06:00', ampm: 'PM' },
+        enableTripNotifications: true,
+      });
     }
-  }, [selectedClientId]);
+  }, [selectedClientId]); // <-- IMPORTANTE: Añadido selectedClientId como dependencia
 
   const loadNotificationConfig = async () => {
     try {
@@ -105,6 +129,12 @@ export default function NotificationSettings() {
       // SOLO INTENTAR CARGAR LA CONFIGURACIÓN SI NO ESTAMOS EN MODO DESARROLLO
       if (import.meta.env.DEV) {
         console.log('Modo desarrollo: Omitiendo carga de configuración desde el backend');
+        
+        // En modo desarrollo, usar la configuración por defecto específica de la empresa
+        if (selectedClientId && DEFAULT_CONFIGS[selectedClientId]) {
+          setNotificationConfig(DEFAULT_CONFIGS[selectedClientId]);
+          console.log(`Modo desarrollo: Usando configuración por defecto para ${selectedClientId}:`, DEFAULT_CONFIGS[selectedClientId]);
+        }
         return;
       }
       
@@ -119,20 +149,22 @@ export default function NotificationSettings() {
       if (data.config) {
         // CONVERSIÓN: Convertimos las horas de 24h del backend a 12h para la UI
         const startTime12h = convertTo12HourFormat(data.config.attendanceReminderStartTime || '09:00');
-        const endTime12h = convertTo12HourFormat(data.config.attendanceReminderEndTime || '22:00');
+        const endTime12h = convertTo12HourFormat(data.config.attendanceReminderEndTime || '22:30');
         const closingTime12h = convertTo12HourFormat(data.config.closingReminderTime || '18:00');
-
-        // Asegurarnos de que enableAttendanceReminder sea true por defecto si no está definido
-        const enableAttendanceReminder = data.config.enableAttendanceReminder !== undefined ? data.config.enableAttendanceReminder : true;
 
         setNotificationConfig({
           ...data.config,
-          enableAttendanceReminder: enableAttendanceReminder,
           attendanceReminderStartTime: startTime12h,
           attendanceReminderEndTime: endTime12h,
           closingReminderTime: closingTime12h,
         });
         console.log('Configuración de notificaciones cargada y convertida:', data.config);
+      } else {
+        // Si no hay configuración en el backend, usar la configuración por defecto específica de la empresa
+        if (selectedClientId && DEFAULT_CONFIGS[selectedClientId]) {
+          setNotificationConfig(DEFAULT_CONFIGS[selectedClientId]);
+          console.log(`Usando configuración por defecto para ${selectedClientId}:`, DEFAULT_CONFIGS[selectedClientId]);
+        }
       }
       
     } catch (error) {
