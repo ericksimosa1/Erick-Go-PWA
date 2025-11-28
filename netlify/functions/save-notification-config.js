@@ -40,6 +40,8 @@ exports.handler = async function (event, context) {
       };
     }
 
+    console.log('Configuración recibida:', config);
+
     const db = admin.firestore();
     
     // Guardar la configuración en una subcolección específica del cliente

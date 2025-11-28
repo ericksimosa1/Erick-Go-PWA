@@ -1,4 +1,4 @@
-// src/components/NotificationSettings.jsx (VERSIÓN DEFINITIVA CORREGIDA)
+// src/components/NotificationSettings.jsx (VERSIÓN CORREGIDA CON MANEJO DE HORA)
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -41,6 +41,12 @@ export default function NotificationSettings() {
   // Función para convertir hora de 24h a 12h con AM/PM
   const convertTo12HourFormat = useCallback((time24) => {
       if (!time24) return { time: '12:00', ampm: 'AM' };
+      
+      // Si ya está en formato 12h, devolverlo tal cual
+      if (typeof time24 === 'object' && time24.time && time24.ampm) {
+        return time24;
+      }
+      
       const [hours, minutes] = time24.split(':');
       let hoursNum = parseInt(hours, 10);
       const minutesNum = parseInt(minutes, 10);
@@ -54,6 +60,12 @@ export default function NotificationSettings() {
   // Función para convertir hora de 12h a 24h
   const convertTo24HourFormat = useCallback((time12, ampm) => {
       if (!time12) return '';
+      
+      // Si ya está en formato 24h, devolverlo tal cual
+      if (typeof time12 === 'string' && time12.includes(':') && !ampm) {
+        return time12;
+      }
+      
       const [hours, minutes] = time12.split(':');
       let hoursNum = parseInt(hours, 10);
       if (ampm === 'PM' && hoursNum < 12) {
@@ -90,11 +102,8 @@ export default function NotificationSettings() {
       setLoading(true);
       setError('');
       
-      // VERIFICACIÓN EXPLÍCITA DE MODO DESARROLLO
-      const isDevelopment = import.meta.env.DEV;
-      console.log('Modo desarrollo:', isDevelopment);
-      
-      if (isDevelopment) {
+      // SOLO INTENTAR CARGAR LA CONFIGURACIÓN SI NO ESTAMOS EN MODO DESARROLLO
+      if (import.meta.env.DEV) {
         console.log('Modo desarrollo: Omitiendo carga de configuración desde el backend');
         return;
       }
@@ -109,12 +118,16 @@ export default function NotificationSettings() {
       
       if (data.config) {
         // CONVERSIÓN: Convertimos las horas de 24h del backend a 12h para la UI
-        const startTime12h = convertTo12HourFormat(data.config.attendanceReminderStartTime || '19:00');
-        const endTime12h = convertTo12HourFormat(data.config.attendanceReminderEndTime || '22:30');
+        const startTime12h = convertTo12HourFormat(data.config.attendanceReminderStartTime || '09:00');
+        const endTime12h = convertTo12HourFormat(data.config.attendanceReminderEndTime || '22:00');
         const closingTime12h = convertTo12HourFormat(data.config.closingReminderTime || '18:00');
+
+        // Asegurarnos de que enableAttendanceReminder sea true por defecto si no está definido
+        const enableAttendanceReminder = data.config.enableAttendanceReminder !== undefined ? data.config.enableAttendanceReminder : true;
 
         setNotificationConfig({
           ...data.config,
+          enableAttendanceReminder: enableAttendanceReminder,
           attendanceReminderStartTime: startTime12h,
           attendanceReminderEndTime: endTime12h,
           closingReminderTime: closingTime12h,
@@ -154,11 +167,8 @@ export default function NotificationSettings() {
       setLoading(true);
       setError('');
       
-      // VERIFICACIÓN EXPLÍCITA DE MODO DESARROLLO
-      const isDevelopment = import.meta.env.DEV;
-      console.log('Modo desarrollo:', isDevelopment);
-      
-      if (isDevelopment) {
+      // SOLO GUARDAR LA CONFIGURACIÓN SI NO ESTAMOS EN MODO DESARROLLO
+      if (import.meta.env.DEV) {
         console.log('Modo desarrollo: Omitiendo guardado de configuración en el backend');
         setSuccessMessage('Configuración guardada (simulado en modo desarrollo)');
         setTimeout(() => setSuccessMessage(''), 3000);
@@ -172,6 +182,8 @@ export default function NotificationSettings() {
         attendanceReminderEndTime: convertTo24HourFormat(notificationConfig.attendanceReminderEndTime.time, notificationConfig.attendanceReminderEndTime.ampm),
         closingReminderTime: convertTo24HourFormat(notificationConfig.closingReminderTime.time, notificationConfig.closingReminderTime.ampm),
       };
+      
+      console.log('Guardando configuración:', payloadToSave);
       
       const response = await fetch('/.netlify/functions/save-notification-config', {
         method: 'POST',
@@ -203,11 +215,8 @@ export default function NotificationSettings() {
       setLoading(true);
       setError('');
       
-      // VERIFICACIÓN EXPLÍCITA DE MODO DESARROLLO
-      const isDevelopment = import.meta.env.DEV;
-      console.log('Modo desarrollo:', isDevelopment);
-      
-      if (isDevelopment) {
+      // SOLO ENVIAR NOTIFICACIÓN SI NO ESTAMOS EN MODO DESARROLLO
+      if (import.meta.env.DEV) {
         console.log('Modo desarrollo: Omitiendo envío de notificación de prueba');
         setSuccessMessage('Notificación de prueba enviada (simulado en modo desarrollo)');
         setOpenTestDialog(false);

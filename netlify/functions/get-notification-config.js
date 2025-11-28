@@ -57,10 +57,12 @@ exports.handler = async function (event, context) {
       // Devolvemos una configuración por defecto si no existe una personalizada
       config = {
         enableNotifications: true,
-        enableAttendanceReminder: true,
-        attendanceReminderTime: '07:00',
+        enableAttendanceReminder: true, // <-- CORRECCIÓN: Asegurar que sea true por defecto
+        attendanceReminderStartTime: '09:00', // <-- CORRECCIÓN: Formato 24h
+        attendanceReminderEndTime: '22:00',   // <-- CORRECCIÓN: Formato 24h
+        attendanceReminderFrequency: 30,
         enableClosingReminder: true,
-        closingReminderTime: '18:00',
+        closingReminderTime: '18:00', // <-- CORRECCIÓN: Formato 24h
         enableTripNotifications: true,
         batchSize: 10,
         retryAttempts: 3
