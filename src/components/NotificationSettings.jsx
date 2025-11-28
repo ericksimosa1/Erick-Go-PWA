@@ -1,4 +1,4 @@
-// src/components/NotificationSettings.jsx (VERSIÓN CORREGIDA CON MANEJO DE EMPRESAS)
+// src/components/NotificationSettings.jsx (VERSIÓN CORREGIDA CON MANEJO DE ERRORES)
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -44,7 +44,7 @@ export default function NotificationSettings() {
     enableAttendanceReminder: true,
     attendanceReminderStartTime: { time: '07:00', ampm: 'AM' }, 
     attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },   
-    attendanceReminderFrequency: 30,        
+    attendanceReminderFrequency: 30,
     
     // Recordatorios de cierre (CAMBIADO a objeto 12h)
     enableClosingReminder: true,

@@ -1,4 +1,4 @@
-// netlify/functions/send-attendance-reminder.js (VERSIÓN FINAL CORREGIDA)
+// netlify/functions/send-attendance-reminder.js (VERSIÓN MEJORADA CON MÁS LOGS)
 
 const webPush = require('web-push');
 const admin = require('firebase-admin');
@@ -37,7 +37,7 @@ if (!admin.apps.length) {
   }
 }
 
-// --- FUNCIÓN CORREGIDA: Ahora busca en el lugar correcto y maneja el nuevo formato de hora ---
+// --- FUNCIÓN MEJORADA: Ahora busca en el lugar correcto y maneja el nuevo formato de hora ---
 async function getNotificationConfig(clientId) {
   console.log(`[DEBUG] getNotificationConfig llamado para clientId: ${clientId}`);
   try {
@@ -57,10 +57,10 @@ async function getNotificationConfig(clientId) {
       enableNotifications: true,
       enableAttendanceReminder: true,
       attendanceReminderFrequency: 30,
-      attendanceReminderStartTime: { time: '07:00', ampm: 'AM' }, // <-- CORRECCIÓN: Nuevo formato
-      attendanceReminderEndTime: { time: '10:00', ampm: 'PM' },   // <-- CORRECCIÓN: Nuevo formato
+      attendanceReminderStartTime: '09:00', // Formato 24h
+      attendanceReminderEndTime: '22:00',   // Formato 24h
       enableClosingReminder: true,
-      closingReminderTime: { time: '06:00', ampm: 'PM' },   // <-- CORRECCIÓN: Nuevo formato
+      closingReminderTime: '18:00', // Formato 24h
       enableTripNotifications: true,
       batchSize: 10,
       retryAttempts: 3
@@ -71,7 +71,7 @@ async function getNotificationConfig(clientId) {
   }
 }
 
-// --- FUNCIÓN CORREGIDA: Ahora respeta la opción "No Usar Transporte Hoy" ---
+// --- FUNCIÓN MEJORADA: Ahora respeta la opción "No Usar Transporte Hoy" ---
 async function getEmployeesNeedingReminder(clientId) {
   console.log(`[DEBUG] getEmployeesNeedingReminder llamado para clientId: ${clientId}`);
   try {
@@ -140,7 +140,7 @@ async function getEmployeesNeedingReminder(clientId) {
   }
 }
 
-// Función para enviar notificaciones a usuarios (CORREGIDA Y MEJORADA)
+// --- FUNCIÓN MEJORADA: Ahora incluye más logs para depuración ---
 async function sendNotificationsToUsers(userIds, payload, clientId) {
   console.log(`[DEBUG] sendNotificationsToUsers llamado para ${userIds.length} usuarios.`);
   try {
@@ -152,16 +152,19 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
     const db = admin.firestore();
     const results = [];
     
-    // Optimización: obtener todas las suscripciones en una sola consulta
+    // MEJORA: Verificar si hay suscripciones para los usuarios
     const suscripcionesSnapshot = await db.collection('suscripciones')
       .where('clientId', '==', clientId)
       .where(admin.firestore.FieldPath.documentId(), 'in', userIds)
       .get();
     
+    console.log(`[DEBUG] Se encontraron ${suscripcionesSnapshot.size} suscripciones para los usuarios`);
+    
     const suscripcionesMap = new Map();
     suscripcionesSnapshot.forEach(doc => {
       const data = doc.data();
       suscripcionesMap.set(doc.id, data.subscription);
+      console.log(`[DEBUG] Suscripción encontrada para usuario ${doc.id}:`, data.subscription ? 'Válida' : 'Inválida');
     });
     
     for (const userId of userIds) {
@@ -215,7 +218,7 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
   }
 }
 
-// --- FUNCIÓN CLAVE CORREGIDA: Ahora considera la zona horaria y el nuevo formato de hora ---
+// --- FUNCIÓN MEJORADA: Ahora considera la zona horaria y el nuevo formato de hora ---
 function isWithinReminderRange(startTime, endTime) {
   // 1. Obtener la hora actual UTC
   const nowUTC = new Date();
@@ -269,7 +272,7 @@ function isWithinReminderRange(startTime, endTime) {
 }
 
 exports.handler = async function (event, context) {
-  console.log('=== INICIO send-attendance-reminder (VERSIÓN FINAL CORREGIDA) ===');
+  console.log('=== INICIO send-attendance-reminder (VERSIÓN MEJORADA) ===');
   console.log(`[DEBUG] Hora de ejecución del servidor (UTC): ${new Date().toISOString()}`);
   
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || 
@@ -372,7 +375,7 @@ exports.handler = async function (event, context) {
       }
     }
     
-    console.log('=== FIN send-attendance-reminder (VERSIÓN FINAL CORREGIDA) ===');
+    console.log('=== FIN send-attendance-reminder (VERSIÓN MEJORADA) ===');
     return {
       statusCode: 200,
       body: JSON.stringify({ 

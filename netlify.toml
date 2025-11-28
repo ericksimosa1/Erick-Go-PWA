@@ -23,3 +23,18 @@
   command = "npm run build"
   # Carpeta donde se encuentran los archivos estáticos generados
   publish = "dist"
+
+# --- CONFIGURACIÓN PARA HEADERS ---
+[[headers]]
+  # Configurar headers para el Service Worker
+  for = "/sw.js"
+  [headers.values]
+    Content-Type = "application/javascript"
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  # Configurar headers para los archivos de manifiesto
+  for = "/manifest.json"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+    Cache-Control = "public, max-age=86400"
