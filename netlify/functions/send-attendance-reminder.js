@@ -1,4 +1,4 @@
-// netlify/functions/send-attendance-reminder.js (VERSIÓN MEJORADA CON MÁS LOGS)
+// netlify/functions/send-attendance-reminder.js (VERSIÓN MEJORADA CON NOMBRES)
 
 const webPush = require('web-push');
 const admin = require('firebase-admin');
@@ -140,17 +140,25 @@ async function getEmployeesNeedingReminder(clientId) {
   }
 }
 
-// --- FUNCIÓN MEJORADA: Ahora incluye más logs para depuración ---
-async function sendNotificationsToUsers(userIds, payload, clientId) {
-  console.log(`[DEBUG] sendNotificationsToUsers llamado para ${userIds.length} usuarios.`);
+// --- FUNCIÓN MEJORADA: Ahora incluye nombres de usuario y empresa en los logs ---
+async function sendNotificationsToUsers(userIds, payload, clientId, clientName) {
+  console.log(`[DEBUG] sendNotificationsToUsers llamado para ${userIds.length} usuarios de la empresa "${clientName}" (${clientId}).`);
   try {
     if (!userIds || userIds.length === 0) {
-      console.log('[DEBUG] No hay usuarios a quienes notificar.');
+      console.log(`[DEBUG] No hay usuarios a quienes notificar para la empresa "${clientName}".`);
       return { success: true, message: 'No hay usuarios a quienes notificar' };
     }
     
     const db = admin.firestore();
     const results = [];
+    
+    // MEJORA: Obtener nombres de usuario en una sola consulta para mayor eficiencia
+    const usuariosSnapshot = await db.collection('usuarios').where(admin.firestore.FieldPath.documentId(), 'in', userIds).get();
+    const userNamesMap = new Map();
+    usuariosSnapshot.forEach(doc => {
+      userNamesMap.set(doc.id, doc.data().nombre || 'Nombre no encontrado');
+    });
+    console.log(`[DEBUG] Nombres de usuarios obtenidos: ${userNamesMap.size}`);
     
     // MEJORA: Verificar si hay suscripciones para los usuarios
     const suscripcionesSnapshot = await db.collection('suscripciones')
@@ -158,23 +166,23 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
       .where(admin.firestore.FieldPath.documentId(), 'in', userIds)
       .get();
     
-    console.log(`[DEBUG] Se encontraron ${suscripcionesSnapshot.size} suscripciones para los usuarios`);
+    console.log(`[DEBUG] Se encontraron ${suscripcionesSnapshot.size} suscripciones para los usuarios de "${clientName}"`);
     
     const suscripcionesMap = new Map();
     suscripcionesSnapshot.forEach(doc => {
       const data = doc.data();
       suscripcionesMap.set(doc.id, data.subscription);
-      console.log(`[DEBUG] Suscripción encontrada para usuario ${doc.id}:`, data.subscription ? 'Válida' : 'Inválida');
     });
     
     for (const userId of userIds) {
-      console.log(`[DEBUG] Procesando notificación para el usuario: ${userId}`);
+      const userName = userNamesMap.get(userId) || 'Usuario no encontrado';
+      console.log(`[DEBUG] Procesando notificación para el usuario: ${userName} (${userId}) de "${clientName}"`);
       
       const subscription = suscripcionesMap.get(userId);
       
       if (!subscription || !subscription.endpoint) {
-        console.log(`[DEBUG] Suscripción inválida para el usuario: ${userId}`);
-        results.push({ userId, success: false, error: 'Suscripción inválida' });
+        console.log(`[DEBUG] ❌ Suscripción inválida para el usuario: ${userName} (${userId}) de "${clientName}"`);
+        results.push({ userId, userName, success: false, error: 'Suscripción inválida' });
         continue;
       }
       
@@ -190,13 +198,13 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
 
       try {
         await webPush.sendNotification(subscription, JSON.stringify(personalizedPayload));
-        console.log(`[DEBUG] ✅ Recordatorio interactivo enviado con éxito al usuario: ${userId}`);
-        results.push({ userId, success: true });
+        console.log(`[DEBUG] ✅ Recordatorio interactivo enviado con éxito al usuario: ${userName} (${userId}) de "${clientName}"`);
+        results.push({ userId, userName, success: true });
       } catch (error) {
-        console.error(`[DEBUG] ❌ Error al enviar recordatorio interactivo al usuario ${userId}:`, error.message);
+        console.error(`[DEBUG] ❌ Error al enviar recordatorio interactivo al usuario ${userName} (${userId}) de "${clientName}":`, error.message);
         
         if (error.statusCode === 410) {
-          console.log(`[DEBUG] Eliminando suscripción inválida para el usuario: ${userId}`);
+          console.log(`[DEBUG] Eliminando suscripción inválida para el usuario: ${userName} (${userId})`);
           try {
             await db.collection('suscripciones').doc(userId).delete();
           } catch (deleteError) {
@@ -204,13 +212,13 @@ async function sendNotificationsToUsers(userIds, payload, clientId) {
           }
         }
       
-        results.push({ userId, success: false, error: error.message });
+        results.push({ userId, userName, success: false, error: error.message });
       }
       
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    console.log(`[DEBUG] Resultados del envío:`, results);
+    console.log(`[DEBUG] Resultados del envío para "${clientName}":`, results);
     return { success: true, results };
   } catch (error) {
     console.error('[DEBUG] Error al enviar recordatorios:', error);
@@ -272,7 +280,7 @@ function isWithinReminderRange(startTime, endTime) {
 }
 
 exports.handler = async function (event, context) {
-  console.log('=== INICIO send-attendance-reminder (VERSIÓN MEJORADA) ===');
+  console.log('=== INICIO send-attendance-reminder (VERSIÓN MEJORADA CON NOMBRES) ===');
   console.log(`[DEBUG] Hora de ejecución del servidor (UTC): ${new Date().toISOString()}`);
   
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || 
@@ -362,7 +370,8 @@ exports.handler = async function (event, context) {
           }
         };
         
-        const result = await sendNotificationsToUsers(employeesNeedingReminder, payload, clientId);
+        // CAMBIO CLAVE: Pasamos el nombre del cliente a la función
+        const result = await sendNotificationsToUsers(employeesNeedingReminder, payload, clientId, clientName);
         results.push({
           clientId,
           clientName,
@@ -375,7 +384,7 @@ exports.handler = async function (event, context) {
       }
     }
     
-    console.log('=== FIN send-attendance-reminder (VERSIÓN MEJORADA) ===');
+    console.log('=== FIN send-attendance-reminder (VERSIÓN MEJORADA CON NOMBRES) ===');
     return {
       statusCode: 200,
       body: JSON.stringify({ 
