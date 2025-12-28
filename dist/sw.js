@@ -1,6 +1,4 @@
-// sw.js
-
-// --- LÓGICA DE CACHÉ (PWA) ---
+// public/sw.js
 const CACHE_NAME = 'erick-go-cache-v5';
 const urlsToCache = [
   '/',
@@ -37,13 +35,14 @@ self.addEventListener('activate', event => {
       );
     })
   );
+  // Nota: El método correcto es claim(), no cliam().
   return self.clients.claim();
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.url.includes('firebaseio.com') || 
-      event.request.url.includes('firestore.googleapis.com') ||
-      event.request.url.includes('googleapis.com')) {
+  // NO INTERCEPTAR PETICIONES A FUNCIONES DE NETLIFY EN MODO DESARROLLO
+  if (event.request.url.includes('localhost:5173') || 
+      event.request.url.includes('.netlify/functions')) {
     return;
   }
 
@@ -82,7 +81,7 @@ self.addEventListener('push', event => {
     icon: '/erick-go-logo.png',
     badge: '/erick-go-logo.png',
     data: {
-      url: '/',
+      url: '/login',
       primaryKey: 1
     }
   };
@@ -103,7 +102,7 @@ self.addEventListener('push', event => {
     vibrate: [100, 50, 100],
     data: payload.data,
     requireInteraction: true,
-    actions: payload.actions || [], // Usamos las acciones si vienen en el payload
+    actions: payload.actions || [], 
     tag: payload.tag || 'erick-go-notification',
     renotify: true,
     silent: false,
@@ -124,7 +123,7 @@ self.addEventListener('notificationclick', event => {
   if (event.action === 'register_attendance') {
     console.log('Usuario quiere registrar asistencia.');
     event.waitUntil(
-      clients.openWindow('/login')
+      self.clients.openWindow('/login') // Corrección: self.clients.openWindow
     );
     return;
   }
@@ -137,8 +136,16 @@ self.addEventListener('notificationclick', event => {
 
     if (!userId || !clientId) {
         console.error('Faltan userId o clientId en los datos de la notificación para opt-out.');
-        event.waitUntil(clients.openWindow('/login'));
+        event.waitUntil(self.clients.openWindow('/login'));
         return;
+    }
+
+    if (self.location.hostname === 'localhost') {
+      console.log('Modo desarrollo: Simulando opt-out para userId:', userId, 'clientId:', clientId);
+      event.waitUntil(
+        self.clients.openWindow('/login')
+      );
+      return;
     }
 
     event.waitUntil(
@@ -162,17 +169,16 @@ self.addEventListener('notificationclick', event => {
             console.error('Error al hacer fetch a opt-out-reminder:', error);
         })
         .finally(() => {
-            return clients.openWindow('/login');
+            return self.clients.openWindow('/login');
         })
     );
     return;
   }
   
-  // MANEJO DE CLICS NORMALES (cuando no hay acciones)
   let urlToOpen = event.notification.data.url || '/login';
 
   event.waitUntil(
-    clients.matchAll({ 
+    self.clients.matchAll({ 
       type: 'window', 
       includeUncontrolled: true 
     }).then(clientList => {
@@ -181,9 +187,18 @@ self.addEventListener('notificationclick', event => {
           return client.focus();
         }
       }
-      if (clients.openWindow) {
-        return clients.openWindow(urlToOpen);
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(urlToOpen);
       }
     })
   );
+});
+
+// --- NUEVO: MANEJO DE ACTUALIZACIÓN INMEDIATA DEL SW ---
+// Este bloque es CRUCIAL para que funcione el botón "ACTUALIZAR"
+self.addEventListener('message', (event) => {
+    // Si recibimos el comando 'SKIP_WAITING', obligamos al SW a activarse inmediatamente
+    if (event.data === 'SKIP_WAITING') {
+        self.skipWaiting();
+    }
 });

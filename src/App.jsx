@@ -1,9 +1,8 @@
 // src/App.jsx
-
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { CssBaseline, CircularProgress, Box, Snackbar, Alert } from '@mui/material';
+import { CssBaseline, CircularProgress, Box, Snackbar, Alert, Button } from '@mui/material';
 import { useAuthStore } from './store/authStore';
 import LoginPage from './pages/LoginPage';
 import CompanySelectorPage from './pages/CompanySelectorPage';
@@ -41,6 +40,9 @@ function AppContent() {
     const [showPermissionSnackbar, setShowPermissionSnackbar] = useState(false);
     const [subscriptionError, setSubscriptionError] = useState('');
 
+    // --- NUEVO ESTADO PARA ACTUALIZACIÓN AUTOMÁTICA ---
+    const [showUpdatePrompt, setShowUpdatePrompt] = useState(false);
+
     // --- FUNCIÓN PARA ACTUALIZAR EL ESTADO DEL RECORDATORIO ---
     const updateReminderStatus = async (action) => {
         if (!user?.uid) {
@@ -49,7 +51,6 @@ function AppContent() {
         }
         console.log(`Actualizando estado de recordatorio a: ${action} para el usuario: ${user.uid}`);
         
-        // SOLO INTENTAR LLAMAR A LA FUNCIÓN SI NO ESTAMOS EN MODO DESARROLLO
         if (import.meta.env.DEV) {
             console.log('Modo desarrollo: Omitiendo llamada a update-reminder-status');
             return;
@@ -67,13 +68,47 @@ function AppContent() {
         }
     };
 
-    // --- EFECTO PARA REGISTRAR EL SERVICE WORKER ---
+    // --- NUEVO: FUNCIÓN PARA FORZAR LA ACTUALIZACIÓN ---
+    const handleUpdate = () => {
+        if (!('serviceWorker' in navigator)) return;
+        
+        navigator.serviceWorker.getRegistration().then(registration => {
+            if (registration.waiting) {
+                // Enviamos el mensaje al SW definido en public/sw.js
+                registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+                setShowUpdatePrompt(false);
+                // Recargamos página
+                window.location.reload();
+            }
+        }).catch(error => {
+            console.error("Error al actualizar:", error);
+        });
+    };
+
+    // --- EFECTO PARA REGISTRAR EL SERVICE WORKER (MODIFICADO) ---
     useEffect(() => {
         const registerServiceWorker = async () => {
-            if ('serviceWorker' in navigator) {
+            // Solo registrar en producción
+            if ('serviceWorker' in navigator && !import.meta.env.DEV) {
                 try {
                     const registration = await navigator.serviceWorker.register('/sw.js');
                     console.log('Service Worker registrado con éxito:', registration);
+
+                    // --- LÓGICA DE ACTUALIZACIÓN ---
+                    registration.addEventListener('updatefound', (event) => {
+                        const newWorker = registration.installing;
+                        if (!newWorker) return;
+
+                        newWorker.addEventListener('statechange', () => {
+                            // Si el nuevo SW está instalado pero el viejo aún controla
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                console.log('Nueva versión disponible.');
+                                // Activamos la alerta en la UI
+                                setShowUpdatePrompt(true);
+                            }
+                        });
+                    });
+
                 } catch (error) {
                     console.error('Error al registrar el Service Worker:', error);
                 }
@@ -176,7 +211,6 @@ function AppContent() {
             
             setSubscription(subscription);
             
-            // SOLO GUARDAR LA SUSCRIPCIÓN SI NO ESTAMOS EN MODO DESARROLLO
             if (!import.meta.env.DEV) {
                 await saveSubscriptionToBackend(subscription);
             } else {
@@ -236,6 +270,25 @@ function AppContent() {
 
     return (
         <>
+            {/* --- ALERTA DE ACTUALIZACIÓN DE PWA (NUEVO) --- */}
+            <Snackbar 
+                open={showUpdatePrompt} 
+                anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+                sx={{ zIndex: 9999 }}
+            >
+                <Alert 
+                    severity="info"
+                    variant="filled"
+                    action={
+                        <Button color="inherit" size="small" onClick={handleUpdate}>
+                            ACTUALIZAR AHORA
+                        </Button>
+                    }
+                >
+                    Hay una nueva versión disponible de Erick Go.
+                </Alert>
+            </Snackbar>
+
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/select-company" element={(user?.rol === 'conductor' || user?.rol === 'empleado') ? <CompanySelectorPage /> : <Navigate to="/login" replace />} />
