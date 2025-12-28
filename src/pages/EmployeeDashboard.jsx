@@ -1,5 +1,4 @@
 // src/pages/EmployeeDashboard.jsx
-
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Paper, List, ListItem, Alert, Button, CircularProgress, TextField, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import { HowToReg as HowToRegIcon, CheckCircle as CheckCircleIcon, AccessTime as AccessTimeIcon } from '@mui/icons-material';
@@ -16,11 +15,11 @@ export default function EmployeeDashboard() {
         setOrUpdateAsistencia, 
         fetchMyAsistenciaForToday, 
         setClosingTimeForDriver, 
-        getTodayClosingTimeForDriver, 
+        getTodayClosingTime, 
         notifyClosingTimeChange, 
         distributeClosingTimeToDrivers, 
         clearAllClosingTimesForToday,
-        fetchDriversByZone // NUEVA FUNCIÓN IMPORTADA
+        fetchDriversByZone 
     } = useFirestore();
     
     const [zones, setZones] = useState([]);
@@ -29,23 +28,30 @@ export default function EmployeeDashboard() {
     const [successMessage, setSuccessMessage] = useState('');
     const [vinculos, setVinculos] = useState([]);
     const [isClosingPerson, setIsClosingPerson] = useState(false);
-    const [closingTimeValue, setClosingTimeValue] = useState(''); // Siempre inicia vacío
+    const [closingTimeValue, setClosingTimeValue] = useState(''); 
     const [closingTimeDialog, setClosingTimeDialog] = useState(false);
     const [todayClosingTime, setTodayClosingTime] = useState(null);
     const [mustRegisterClosingTime, setMustRegisterClosingTime] = useState(false);
     const [selectedZone, setSelectedZone] = useState(null);
-    const [initialized, setInitialized] = useState(false); // Nuevo estado para controlar inicialización
+    const [initialized, setInitialized] = useState(false); 
 
-    // --- NUEVA FUNCIÓN PARA ENVIAR NOTIFICACIONES DE ASISTENCIA REGISTRADA (CORREGIDA) ---
+    // --- FUNCIÓN ROBUSTA PARA NOTIFICACIONES ---
     const sendAttendanceNotificationToDrivers = async (zoneId, zoneName) => {
-        console.log(`Enviando notificación de asistencia a conductores de la zona ${zoneName}...`);
+        // 🔒 DETECCIÓN ROBUSTA DE MODO DESARROLLO (POR URL)
+        const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         
+        if (isDev) {
+            console.log(`[MODO DESARROLLO] Se omite el envío de notificación de asistencia a la zona: ${zoneName}`);
+            return; 
+        }
+        
+        console.log(`Enviando notificación de asistencia a conductores de la zona ${zoneName}...`);
         const notificationPayload = {
             title: 'Nuevo Registro de Asistencia',
             body: `El empleado ${user.nombre} ha registrado su asistencia en la zona: ${zoneName}.`,
             icon: '/erick-go-logo.png',
             data: {
-                url: '/conductor-dashboard' // URL a la que se abrirá al hacer clic
+                url: '/conductor-dashboard' 
             }
         };
 
@@ -68,13 +74,15 @@ export default function EmployeeDashboard() {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    userIds: validDriverIds, // <-- CORRECCIÓN: Usar userIds (plural) con un array
+                    userIds: validDriverIds, 
                     payload: notificationPayload,
                 }),
             });
 
             if (!response.ok) {
-                throw new Error(`Error ${response.status}: ${response.statusText}`);
+                const errorText = await response.text();
+                console.error("ERROR DEL SERVIDOR (TEXTO):", errorText);
+                throw new Error(errorText || 'Error al enviar notificación.');
             }
 
             console.log(`Notificaciones de asistencia enviadas exitosamente a ${validDriverIds.length} conductores.`);
@@ -143,17 +151,31 @@ export default function EmployeeDashboard() {
 
                 if (targetClientId) {
                     console.log("Empresa a cargar:", targetClientId);
-                    // Verificar si este usuario es el encargado de cerrar hoy
+                    
+                    // Verificar si este usuario es el encargado de cerrar hoy (según configuración semanal)
                     const currentVinculo = userVinculos.find(v => v.clientId === targetClientId);
+                    
                     if (currentVinculo && currentVinculo.esEncargadoCierre) {
                         setIsClosingPerson(true);
-                        // Siempre requerir registro de hora de cierre para el encargado
-                        setMustRegisterClosingTime(true);
-                        setTodayClosingTime(null); // Resetear la hora de cierre
                         
-                        // CAMBIO: No cargar la hora de cierre anterior al inicializar
-                        // Solo la cargaremos cuando el usuario la solicite explícitamente
-                        console.log("Usuario es encargado de cierre, pero no se carga hora anterior");
+                        // PASO 1: Verificar SI YA EXISTE una hora de cierre en la configuración diaria para hoy
+                        console.log("Usuario es encargado de cierre. Verificando si ya existe hora registrada en BD...");
+                        const existingTime = await getTodayClosingTime(targetClientId);
+
+                        if (existingTime) {
+                            console.log("Hora de cierre encontrada en configuración diaria:", existingTime);
+                            setTodayClosingTime(existingTime);
+                            setClosingTimeValue(existingTime);
+                            setMustRegisterClosingTime(false);
+                        } else {
+                            console.log("No se encontró hora de cierre configurada para hoy. Es obligatorio registrarla.");
+                            setTodayClosingTime(null);
+                            setClosingTimeValue('');
+                            setMustRegisterClosingTime(true);
+                        }
+                    } else {
+                        setIsClosingPerson(false);
+                        setMustRegisterClosingTime(false);
                     }
                 }
 
@@ -161,12 +183,12 @@ export default function EmployeeDashboard() {
                 console.error("EmployeeDashboard: Error durante la inicialización:", error);
             } finally {
                 setLoading(false);
-                setInitialized(true); // Marcar como inicializado
+                setInitialized(true);
             }
         };
 
         initializeDashboard();
-    }, [user, navigate, fetchUserVinculos, getTodayClosingTimeForDriver, initialized]);
+    }, [user, navigate, fetchUserVinculos, getTodayClosingTime, initialized]);
 
     // EFECTO 2: Carga de datos específicos de la empresa
     useEffect(() => {
@@ -193,10 +215,6 @@ export default function EmployeeDashboard() {
                 setMyAsistencia(asistencia);
                 console.log("Asistencia de hoy cargada.");
                 
-                // CAMBIO: No cargar automáticamente la hora de cierre al cargar datos de la empresa
-                // Solo la cargaremos cuando el usuario la solicite explícitamente
-                console.log("No se carga automáticamente la hora de cierre al cargar datos de la empresa");
-                
             } catch (error) {
                 console.error("EmployeeDashboard: Error al cargar datos de la empresa:", error);
             } finally {
@@ -206,7 +224,7 @@ export default function EmployeeDashboard() {
         
         loadCompanyData();
 
-    }, [selectedClientId, fetchZones, fetchMyAsistenciaForToday, isClosingPerson, getTodayClosingTimeForDriver]);
+    }, [selectedClientId, fetchZones, fetchMyAsistenciaForToday, isClosingPerson, getTodayClosingTime]);
 
     const handleCheckInOrChange = async (zoneId) => {
         try {
@@ -214,9 +232,8 @@ export default function EmployeeDashboard() {
                 throw new Error("Faltan datos del usuario o de la empresa.");
             }
             
-            // Si es el encargado de cierre y no ha registrado la hora de cierre, mostrar diálogo
             if (isClosingPerson && mustRegisterClosingTime) {
-                setSelectedZone(zoneId); // Guardar la zona seleccionada
+                alert("Como encargado de cierre, debes registrar la hora de cierre antes de registrar tu asistencia.");
                 setClosingTimeDialog(true);
                 return;
             }
@@ -230,7 +247,7 @@ export default function EmployeeDashboard() {
             setSuccessMessage(`¡Tu asistencia ha sido registrada en: ${zoneName}!`);
             setTimeout(() => setSuccessMessage(''), 5000);
 
-            // --- NUEVO: ENVIAR NOTIFICACIÓN A LOS CONDUCTORES ---
+            // --- ENVIAR NOTIFICACIÓN A LOS CONDUCTORES ---
             console.log(">>> Enviando notificación a los conductores de la zona...");
             await sendAttendanceNotificationToDrivers(zoneId, zoneName);
             console.log(">>> Notificación enviada.");
@@ -258,22 +275,16 @@ export default function EmployeeDashboard() {
                 throw new Error("Faltan datos para registrar la hora de cierre.");
             }
             
-            // FIX: 'user' ya es el uid, así que lo pasamos directamente.
             await setClosingTimeForDriver(selectedClientId, user, closingTimeValue, user, user.nombre);
             
-            // CAMBIO: Actualizar el estado inmediatamente después de guardar
-            console.log("Actualizando estado todayClosingTime con:", closingTimeValue);
+            console.log("Actualizando estado local...");
             setTodayClosingTime(closingTimeValue);
             setMustRegisterClosingTime(false);
             setClosingTimeDialog(false);
             setSuccessMessage(`¡Hora de cierre registrada: ${formatTime12Hour(closingTimeValue)}!`);
-            setTimeout(() => setSuccessMessage(''), 5000);
             
-            // CAMBIO: Distribuir la hora de cierre a todos los conductores con empleados disponibles
-            // FIX: Pasamos 'user' que es el uid.
             await distributeClosingTimeToDrivers(selectedClientId, closingTimeValue, user);
             
-            // Después de registrar la hora de cierre, registrar la asistencia si ya se había seleccionado una zona
             if (selectedZone) {
                 await setOrUpdateAsistencia(user, selectedZone, user.nombre, selectedClientId);
                 setMyAsistencia({ zona: selectedZone });
@@ -291,58 +302,8 @@ export default function EmployeeDashboard() {
 
     const handleCloseClosingTimeDialog = () => {
         setClosingTimeDialog(false);
-        // No limpiamos el valor al cerrar el diálogo para mantener la hora si ya estaba registrada
-        // setClosingTimeValue(''); 
-        
-        // Si el usuario cierra el diálogo sin registrar la hora, mostramos una advertencia
         if (isClosingPerson && mustRegisterClosingTime) {
             alert("Como encargado de cierre, debes registrar la hora de cierre antes de continuar.");
-        }
-    };
-
-    // CAMBIO: Nueva función para cargar la hora de cierre existente cuando el usuario lo solicita
-    const handleLoadExistingClosingTime = async () => {
-        try {
-            if (!user?.uid || !selectedClientId) {
-                console.error("Faltan datos para cargar la hora de cierre existente");
-                return;
-            }
-            
-            const closing = await getTodayClosingTimeForDriver(selectedClientId, user.uid);
-            if (closing) {
-                console.log("Hora de cierre existente cargada:", closing);
-                setClosingTimeValue(closing);
-                setTodayClosingTime(closing);
-                setMustRegisterClosingTime(false);
-            } else {
-                console.log("No se encontró hora de cierre existente para hoy");
-                setClosingTimeValue('');
-                setTodayClosingTime(null);
-                setMustRegisterClosingTime(true);
-            }
-        } catch (error) {
-            console.error("Error al cargar la hora de cierre existente:", error);
-        }
-    };
-
-    // CAMBIO: Nueva función para limpiar todas las horas de cierre del día
-    const handleClearAllClosingTimes = async () => {
-        try {
-            if (!selectedClientId) {
-                console.error("Faltan datos para limpiar las horas de cierre");
-                return;
-            }
-            
-            await clearAllClosingTimesForToday(selectedClientId);
-            console.log("Todas las horas de cierre del día han sido eliminadas");
-            setClosingTimeValue('');
-            setTodayClosingTime(null);
-            setMustRegisterClosingTime(true);
-            setSuccessMessage("Todas las horas de cierre del día han sido eliminadas");
-            setTimeout(() => setSuccessMessage(''), 3000);
-        } catch (error) {
-            console.error("Error al limpiar las horas de cierre:", error);
-            alert("Hubo un error al limpiar las horas de cierre. Por favor, intenta de nuevo.");
         }
     };
 
@@ -389,7 +350,7 @@ export default function EmployeeDashboard() {
                                     size="small" 
                                     sx={{ ml: 1 }}
                                     onClick={() => {
-                                        setMustRegisterClosingTime(true);
+                                        setClosingTimeValue(todayClosingTime);
                                         setClosingTimeDialog(true);
                                     }}
                                 >
@@ -399,7 +360,7 @@ export default function EmployeeDashboard() {
                         )}
                         
                         {mustRegisterClosingTime && (
-                            <Box sx={{ mt: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                            <Box sx={{ mt: 2 }}>
                                 <Button 
                                     variant="contained" 
                                     color="warning" 
@@ -407,24 +368,6 @@ export default function EmployeeDashboard() {
                                     onClick={() => setClosingTimeDialog(true)}
                                 >
                                     Registrar Hora de Cierre
-                                </Button>
-                                
-                                {/* CAMBIO: Botón para cargar hora de cierre existente */}
-                                <Button 
-                                    variant="outlined" 
-                                    color="primary"
-                                    onClick={handleLoadExistingClosingTime}
-                                >
-                                    Usar Hora de Cierre Anterior
-                                </Button>
-                                
-                                {/* CAMBIO: Botón para limpiar todas las horas de cierre del día */}
-                                <Button 
-                                    variant="outlined" 
-                                    color="error"
-                                    onClick={handleClearAllClosingTimes}
-                                >
-                                    Limpiar Todas las Horas de Cierre
                                 </Button>
                             </Box>
                         )}
@@ -501,7 +444,7 @@ export default function EmployeeDashboard() {
                     <Button 
                         onClick={handleSetClosingTime} 
                         variant="contained"
-                        disabled={!closingTimeValue} // Deshabilitar el botón si no hay valor
+                        disabled={!closingTimeValue}
                     >
                         Guardar
                     </Button>

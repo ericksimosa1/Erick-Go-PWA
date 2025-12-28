@@ -1053,11 +1053,11 @@ export default function AdminDashboard() {
                     <TabPanel value={tabValue} index={2}>
                         <Typography variant="h5" gutterBottom>
                             <AccessTimeIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
-                            Configuración de Cierre Diario
+                            Configuración de Encargados de Cierre
                         </Typography>
                         
                         <Alert severity="info" sx={{ mb: 3 }}>
-                            Aquí puedes configurar quién será el encargado de cerrar la empresa cada día. Esta persona deberá registrar la hora de cierre del local, que será visible para los conductores.
+                            Configura quién será el encargado de cerrar la empresa para cada día de la semana. Esta configuración se mantendrá hasta que la modifiques. El encargado del día podrá registrar la hora de cierre desde su panel, y esta será visible para los conductores.
                         </Alert>
                         
                         {todayClosingPerson ? (
@@ -1069,7 +1069,7 @@ export default function AdminDashboard() {
                             </Card>
                         ) : (
                             <Alert severity="warning" sx={{ mb: 3 }}>
-                                No hay un encargado de cierre configurado para hoy.
+                                No hay un encargado de cierre configurado para hoy. Configura la semana completa para asegurar que siempre haya un encargado.
                             </Alert>
                         )}
                         
@@ -1081,67 +1081,21 @@ export default function AdminDashboard() {
                                 </CardContent>
                             </Card>
                         ) : (
-                            <Alert severity="warning" sx={{ mb: 3 }}>
-                                No hay una hora de cierre configurada para hoy.
+                            <Alert severity="info" sx={{ mb: 3 }}>
+                                El encargado de cierre de hoy aún no ha registrado la hora de cierre.
                             </Alert>
                         )}
                         
                         <Button 
                             variant="contained" 
                             color="primary" 
-                            startIcon={<AccessTimeIcon />}
-                            onClick={handleOpenClosingPersonDialog}
-                            sx={{ mb: 2, mr: 2 }}
-                        >
-                            Configurar Encargado de Cierre Diario
-                        </Button>
-                        
-                        <Button 
-                            variant="contained" 
-                            color="secondary" 
                             startIcon={<CalendarTodayIcon />}
                             onClick={handleOpenWeeklyClosingConfigDialog}
                             sx={{ mb: 2 }}
+                            size="large"
                         >
                             Configurar Encargados de Cierre Semanal
                         </Button>
-                        
-                        <Box sx={{ width: '100%', overflowX: 'auto' }}>
-                            <TableContainer component={Paper} sx={{ minWidth: '800px' }}>
-                                <Table>
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell>Correo Electrónico</TableCell>
-                                            <TableCell>Nombre</TableCell>
-                                            <TableCell>Rol</TableCell>
-                                            <TableCell>Acciones</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {users.filter(u => u.userData.rol === 'empleado').map((u) => (
-                                            <TableRow key={u.vinculoId}>
-                                                <TableCell>{u.userData.correo}</TableCell>
-                                                <TableCell>{u.userData.nombre || 'Sin nombre'}</TableCell>
-                                                <TableCell>{u.userData.rol || 'Sin rol'}</TableCell>
-                                                <TableCell>
-                                                    <Button 
-                                                        variant="outlined" 
-                                                        color="primary"
-                                                        onClick={() => {
-                                                            setSelectedClosingPerson(u.vinculoId);
-                                                            handleSetClosingPerson();
-                                                        }}
-                                                        disabled={closingPersonLoading}
-                                                    >
-                                                        Asignar como Encargado
-                                                    </Button>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                        </Box>
                     </TabPanel>
 
                     <TabPanel value={tabValue} index={3}>

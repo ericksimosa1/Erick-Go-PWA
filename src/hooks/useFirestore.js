@@ -321,7 +321,7 @@ export const useFirestore = () => {
         const allVinculosSnapshot = await getDocs(vinculosCollection);
         
         console.log("[DEBUG] Analizando los primeros 5 vínculos en detalle:");
-        allVinculosSnapshot.docs.slice(0, 5).forEach((doc, index) => {
+        allVinculosSnapshot.docs.slice(0,5).forEach((doc, index) => {
             const data = doc.data();
             console.log(`[DEBUG] Vínculo ${index + 1}:`, {
                 id: doc.id,
@@ -396,12 +396,8 @@ export const useFirestore = () => {
             return { deletedCount: 0 };
         }
         
-        const userIdsToDelete = [...new Set(filteredVinculos.map(doc => doc.data().userId))];
-        const otherVinculosQuery = query(vinculosCollection, where('userId', 'in', userIdsToDelete));
-        const otherVinculosSnapshot = await getDocs(otherVinculosQuery);
-        
-        const usersToDeleteIds = userIdsToDelete.filter(userId => {
-            const userVinculos = otherVinculosSnapshot.docs.filter(doc => doc.data().userId === userId);
+        const userIdsToDelete = userIds.filter(userId => {
+            const userVinculos = allVinculosSnapshot.docs.filter(doc => doc.data().userId === userId);
             if (userVinculos.length === 0) return true;
             return userVinculos.every(doc => {
                 const data = doc.data();
@@ -412,7 +408,7 @@ export const useFirestore = () => {
             });
         });
         
-        console.log(`Se eliminarán ${usersToDeleteIds.length} documentos de usuarios que solo tienen rol: ${role}`);
+        console.log(`Se eliminarán ${userIdsToDelete.length} documentos de usuarios que solo tienen rol: ${role}`);
         
         const batch = writeBatch(db);
         filteredVinculos.forEach(doc => {
@@ -421,14 +417,14 @@ export const useFirestore = () => {
         await batch.commit();
         console.log(`Se eliminaron ${filteredVinculos.length} vínculos de usuarios con rol: ${role}`);
         
-        if (usersToDeleteIds.length > 0) {
+        if (userIdsToDelete.length > 0) {
             const usersBatch = writeBatch(db);
-            usersToDeleteIds.forEach(userId => {
+            userIdsToDelete.forEach(userId => {
                 const userRef = doc(db, 'usuarios', userId);
                 usersBatch.delete(userRef);
             });
             await usersBatch.commit();
-            console.log(`Se eliminaron ${usersToDeleteIds.length} documentos de usuarios con rol: ${role}`);
+            console.log(`Se eliminaron ${userIdsToDelete.length} documentos de usuarios con rol: ${role}`);
         }
         
         return { deletedCount: filteredVinculos.length };
@@ -1032,7 +1028,7 @@ export const useFirestore = () => {
                 // CORRECCIÓN: Considerar como cierre de empresa cualquier registro que:
                 // 1. No tenga userId
                 // 2. Tenga isCompanyWide como true
-                // 3. Pertenenezca a un usuario con rol 'empleado' (el encargado de cierre)
+                // 3. Pertenezca a un usuario con rol 'empleado' (el encargado de cierre)
                 if (!data.userId || data.isCompanyWide === true) {
                     companyClosingTime = data.horaCierre;
                     console.log(`Hora de cierre de la empresa encontrada (criterio 1 o 2): ${data.horaCierre}`);
@@ -1091,6 +1087,8 @@ export const useFirestore = () => {
             // Para cada conductor, verificar si tiene empleados disponibles hoy
             const todayAsistencias = await fetchTodayAsistencias(clientId);
             
+            const driversToNotify = []; // Guardamos los conductores que efectivamente recibieron la hora
+
             for (const driver of drivers) {
                 // CORRECCIÓN: Verificar que driver tiene userId
                 if (!driver.userId) {
@@ -1119,7 +1117,53 @@ export const useFirestore = () => {
                         currentUser.nombre || 'Usuario desconocido'
                     );
                     console.log(`Hora de cierre ${closingTime} asignada al conductor ${driver.userData.nombre}`);
+                    driversToNotify.push(driver.userId); // Agregamos a la lista de notificados
                 }
+            }
+
+            // --- NUEVO: ENVIAR NOTIFICACIÓN PUSH A LOS CONDUCTORES AFECTADOS ---
+            if (driversToNotify.length > 0) {
+                
+                // 🔒 PROTECCIÓN MODO DESARROLLO
+                if (import.meta.env.DEV) {
+                    console.log(`[MODO DESARROLLO] Se omitió el envío de notificaciones a ${driversToNotify.length} conductores para evitar errores de conexión.`);
+                    return true; 
+                }
+
+                console.log(`Enviando notificaciones de cambio de hora a ${driversToNotify.length} conductores...`);
+                console.log("Lista de IDs a notificar:", driversToNotify);
+                
+                const notificationPayload = {
+                    title: 'Hora de Cierre Actualizada',
+                    body: `El encargado ${currentUser.nombre} ha establecido la hora de cierre a las ${closingTime}.`,
+                    icon: '/erick-go-logo.png',
+                    data: { url: '/conductor-dashboard' }
+                };
+
+                try {
+                    const response = await fetch('/.netlify/functions/send-notification', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            userIds: driversToNotify,
+                            payload: notificationPayload,
+                            clientId: clientId,
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error("ERROR DEL SERVIDOR (TEXTO):", errorText);
+                        throw new Error(errorText || 'Error al enviar notificación.');
+                    }
+
+                    const result = await response.json();
+                    console.log('Notificaciones de cambio de hora enviadas con éxito:', result);
+                } catch (error) {
+                    console.error('Error al enviar notificaciones de cambio de hora:', error);
+                }
+            } else {
+                console.log("No hay conductores con empleados activos para notificar.");
             }
             
             return true;
@@ -1280,5 +1324,5 @@ export const useFirestore = () => {
     };
 };
 
-// CORRECCIÓN: Removed the function call () from the export to fix "Invalid hook call" error
+// CORRECCIÓN: Removed function call () from the export to fix "Invalid hook call" error
 export default useFirestore;

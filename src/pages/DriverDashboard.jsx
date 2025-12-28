@@ -1,12 +1,11 @@
 // src/pages/DriverDashboard.jsx
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Typography, Paper, List, ListItem, ListItemText, Alert, Button, CircularProgress, ToggleButton, ToggleButtonGroup, Divider, Card, CardContent } from '@mui/material';
 import { PlayArrow as PlayArrowIcon, ViewList as ViewListIcon, Category as CategoryIcon, Done as DoneIcon, Stop as StopIcon, AccessTime as AccessTimeIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useFirestore } from '../hooks/useFirestore';
 import { useAuthStore } from '../store/authStore';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, Timestamp, addDoc, collection } from 'firebase/firestore'; // CORRECCIÓN: Timestamp importado
 import { db } from '../firebase';
 
 export default function DriverDashboard() {
@@ -49,6 +48,7 @@ export default function DriverDashboard() {
     const [isStartingTrip, setIsStartingTrip] = useState(false);
     const [activeTripId, setActiveTripId] = useState(null);
     const [droppedOffEmployees, setDroppedOffEmployees] = useState([]);
+    const [trips, setTrips] = useState([]);
     
     // Estados de modo de viaje
     const [tripMode, setTripMode] = useState(null);
@@ -63,6 +63,13 @@ export default function DriverDashboard() {
 
     // --- FUNCIÓN PARA ENVIAR NOTIFICACIONES DE INICIO DE VIAJE A EMPLEADOS ---
     const sendTripStartedNotification = async (employees) => {
+        // 🔒 PROTECCIÓN MODO DESARROLLO (Versión Robusta)
+        const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isDev) {
+            console.log('[MODO DESARROLLO] Se omite el envío de notificación de inicio de viaje.');
+            return; 
+        }
+
         console.log(`Enviando notificación de inicio de viaje a ${employees.length} empleados...`);
         
         const notificationPayload = {
@@ -74,7 +81,6 @@ export default function DriverDashboard() {
             }
         };
 
-        // <-- CORRECCIÓN: Extraer los IDs de los empleados en un array
         const employeeIds = employees.map(emp => emp.empleadoId);
 
         try {
@@ -84,7 +90,7 @@ export default function DriverDashboard() {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    userIds: employeeIds, // <-- CORRECCIÓN: Usar userIds (plural) con un array
+                    userIds: employeeIds,
                     payload: notificationPayload,
                 }),
             });
@@ -99,14 +105,19 @@ export default function DriverDashboard() {
         }
     };
 
-    // --- NUEVA FUNCIÓN PARA ENVIAR ESTADO DEL VIAJE A ADMINISTRADORES (CORREGIDA) ---
+    // --- NUEVA FUNCIÓN PARA ENVIAR ESTADO DEL VIAJE A ADMINISTRADORES ---
     const sendTripStatusToAdmins = async (status, driverName, employeeCount) => {
+        // 🔒 PROTECCIÓN MODO DESARROLLO (Versión Robusta)
+        const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isDev) {
+            console.log('[MODO DESARROLLO] Se omite el envío de notificación de viaje a administradores.');
+            return; 
+        }
+
         console.log(`Enviando notificación de viaje ${status} a administradores...`);
         
         const admins = allUsers.filter(u => u && u.userData && u.userData.rol === 'administrador');
         
-        console.log('VERIFICACIÓN: Lista de usuarios filtrados como administradores:', admins);
-
         if (admins.length === 0) {
             console.log("No hay administradores en esta empresa para notificar.");
             return;
@@ -129,7 +140,6 @@ export default function DriverDashboard() {
             };
         }
 
-        // <-- CORRECCIÓN: Extraer los IDs de los administradores en un array
         const adminIds = admins.map(admin => admin.userId);
 
         try {
@@ -137,7 +147,7 @@ export default function DriverDashboard() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    userIds: adminIds, // <-- CORRECCIÓN: Usar userIds (plural) con un array
+                    userIds: adminIds,
                     payload: notificationPayload,
                 }),
             });
@@ -163,7 +173,7 @@ export default function DriverDashboard() {
         return `${hour12.toString().padStart(2, '0')}:${minutes} ${period}`;
     };
 
-    // Función para formatear la fecha con día de la semana y formato DD/MM/YYYY
+    // Función para formatear la fecha con día de la semana
     const formatDateWithDayOfWeek = () => {
         const today = new Date();
         const daysOfWeek = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -174,7 +184,7 @@ export default function DriverDashboard() {
         return `${dayOfWeek} ${day}/${month}/${year}`;
     };
 
-    // Función para obtener el mensaje correcto según la situación
+    // Función para obtener el mensaje de cierre
     const getClosingMessage = () => {
         if (availableEmployees.length === 0) {
             return "No tiene empleados disponibles para hoy";
@@ -202,9 +212,6 @@ export default function DriverDashboard() {
                     console.log(`Vínculo para empresa ${vinculo.clientId}:`, vinculo);
                     console.log(`- Zonas asignadas:`, vinculo.zonasAsignadas || "No definidas");
                     console.log(`- Grupos de zonas:`, vinculo.gruposZonas || "No definidos");
-                    console.log(`- ID del conductor en el vínculo:`, vinculo.conductorId);
-                    console.log(`- Rol en el vínculo:`, vinculo.rol);
-                    console.log(`- Activo:`, vinculo.activo);
                 });
                 
                 setVinculos(driverVinculos);
@@ -232,7 +239,7 @@ export default function DriverDashboard() {
         initializeDriver();
     }, [user, selectedClientId, navigate, fetchUserVinculos]);
     
-    // Escuchar cambios en las horas de cierre - Optimizado para evitar múltiples llamadas
+    // Escuchar cambios en las horas de cierre - Optimizado
     useEffect(() => {
         if (!selectedClientId || !user || closingTimesLoaded.current) return;
         
@@ -483,18 +490,24 @@ export default function DriverDashboard() {
             return;
         }
         try {
-            const asistencia = todayAsistencias.find(a => a.empleadoId === employeeId);
+            // CORRECCIÓN: Cambiar const a let para permitir reasignación
+            let asistencia = todayAsistencias.find(a => a.id === employeeId);
+            
             if (!asistencia) {
-                console.error("No se encontró el registro de asistencia para el empleado:", employeeId);
-                alert("Error: No se encontró el registro de asistencia.");
-                return;
+                // Intento por empleadoId si id falla (a veces los datos vienen mezclados)
+                const asistenciaByEmpId = todayAsistencias.find(a => a.empleadoId === employeeId);
+                if (asistenciaByEmpId) {
+                    asistencia = asistenciaByEmpId;
+                } else {
+                    console.error("No se encontró el registro de asistencia para el empleado:", employeeId);
+                    alert("Error: No se encontró el registro de asistencia.");
+                    return;
+                }
             }
 
             setDroppedOffEmployees(prev => [...prev, employeeId]);
             const tripRef = doc(db, 'trips', activeTripId);
-            await updateDoc(tripRef, {
-                empleadosEntregados: arrayUnion(employeeId)
-            });
+            await updateDoc(tripRef, { empleadosEntregados: arrayUnion(employeeId) });
 
             await markAsistenciaAsCompleted(asistencia.id);
 
@@ -505,43 +518,49 @@ export default function DriverDashboard() {
             
             console.log(`Empleado ${employeeId} marcado como entregado y completado.`);
             setSuccessMessage('¡Llegada reportada con éxito!');
-            setTimeout(() => setSuccessMessage(''), 2000);
+            setTimeout(() => setSuccessMessage(''), 5000);
 
             // --- ENVIAR NOTIFICACIÓN INDIVIDUAL DE VIAJE COMPLETADO ---
-            console.log(`>>> Enviando notificación de viaje completado a ${asistencia.empleadoNombre}...`);
-            const notificationPayload = {
-                title: '¡Viaje Completado!',
-                body: `¡Hola, ${asistencia.empleadoNombre}! Tu viaje ha sido completado exitosamente. ¡Buen día!`,
-                icon: '/erick-go-logo.png',
-                data: {
-                    url: '/empleado-dashboard'
+            const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            
+            if (!isDev) {
+                console.log(`>>> Enviando notificación de viaje completado a ${asistencia.empleadoNombre}...`);
+                const notificationPayload = {
+                    title: '¡Viaje Completado!',
+                    body: `¡Hola, ${asistencia.empleadoNombre}! Tu viaje ha sido completado exitosamente. ¡Buen día!`,
+                    icon: '/erick-go-logo.png',
+                    data: {
+                        url: '/empleado-dashboard'
+                    }
+                };
+
+                try {
+                    const response = await fetch('/.netlify/functions/send-notification', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            userIds: [employeeId],
+                            payload: notificationPayload,
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Error ${response.status}: ${response.statusText}`);
+                    }
+
+                    console.log(`Notificación de viaje completado enviada a ${asistencia.empleadoNombre}`);
+                } catch (error) {
+                    console.error(`Error al enviar notificación de viaje completado a ${asistencia.empleadoNombre}:`, error);
                 }
-            };
-
-            try {
-                const response = await fetch('/.netlify/functions/send-notification', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        userIds: [employeeId], // <-- CORRECCIÓN: Usar userIds (plural) con un array
-                        payload: notificationPayload,
-                    }),
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Error ${response.status}: ${response.statusText}`);
-                }
-
-                console.log(`Notificación de viaje completado enviada a ${asistencia.empleadoNombre}`);
-            } catch (error) {
-                console.error(`Error al enviar notificación de viaje completado a ${asistencia.empleadoNombre}:`, error);
+            } else {
+                console.log('[MODO DESARROLLO] Notificación de viaje completado omitida.');
             }
 
         } catch (error) {
             console.error("Error al reportar la llegada:", error);
-            alert("Hubo un error al reportar la llegada. Intenta de nuevo.");
+            alert("Hubo un error al reportar la llegada. Por favor, intenta de nuevo.");
         }
     };
 
@@ -605,18 +624,23 @@ export default function DriverDashboard() {
                 conductorNombre: user.nombre,
                 empleadosIds: employeesForThisTrip.map(emp => emp.empleadoId),
                 estado: 'en_progreso',
-                fechaInicio: new Date(),
+                fechaInicio: Timestamp.now(), // CORRECCIÓN: Usar Timestamp.now()
                 clientId: selectedClientId,
                 empleadosEntregados: [],
                 horaCierre: driverClosingTime || companyClosingTime
             };
             console.log(">>> PASO 2: Llamando a addTrip. Esto puede tardar...");
-            const tripDocRef = await addTrip(tripData);
+            const tripDocRef = await addDoc(collection(db, 'trips'), tripData);
             console.log(">>> PASO 3: addTrip ha respondido. Referencia:", tripDocRef);
 
             console.log(">>> PASO 4: Actualizando estado local con el ID del viaje:", tripDocRef.id);
             setActiveTripId(tripDocRef.id);
             setDroppedOffEmployees([]);
+            
+            // CORRECCIÓN: Agregamos el viaje al estado local 'trips' aunque solo usemos activeTripId
+            // Pero para mantener compatibilidad con renderActiveTripList, lo añadimos.
+            const newTrip = { id: tripDocRef.id, ...tripData };
+            setTrips(prev => [...prev, newTrip]);
             setTripStarted(true);
             setSuccessMessage(`¡Viaje iniciado para ${employeesForThisTrip.length} empleados!`);
             
@@ -635,7 +659,7 @@ export default function DriverDashboard() {
 
         } catch (error) {
             console.error(">>> ERROR EN EL PROCESO DE VIAJE:", error);
-            alert("Hubo un error al iniciar el viaje. Intenta de nuevo.");
+            alert("Hubo un error al iniciar el viaje. Por favor, intenta de nuevo.");
         } finally {
             console.log(">>> FINALIZANDO: isStartingTrip = false");
             setIsStartingTrip(false);
@@ -731,7 +755,7 @@ export default function DriverDashboard() {
                         </>
                     ) : (
                         <Alert severity="success" sx={{ mb: 2 }}>
-                            ¡Tu jornada ha sido finalizada exitosamente! Nos Vemos Mañana.
+                            ¡Tu jornada ha sido finalizada exitosamente! Nos vemos Mañana.
                         </Alert>
                     )}
                 </>
@@ -817,7 +841,7 @@ export default function DriverDashboard() {
                                     {renderActiveTripList(group.employees)}
                                 </Box>
                             ))}
-                            <Divider sx={{ my: 3 }} />
+                            <Divider sx={{ my: 2 }} />
                             <Box sx={{ textAlign: 'center' }}>
                                 <Button 
                                     variant="contained" 
