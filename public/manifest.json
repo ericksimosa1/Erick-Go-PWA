@@ -3,11 +3,14 @@
   "short_name": "Erick Go",
   "description": "Aplicación para la organización de viajes de empresa.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#1A237E",
   "theme_color": "#1A237E",
   "orientation": "portrait",
   "gcm_sender_id": "103953800507",
+  "categories": ["business", "transportation"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icons/android-chrome-192x192.png",
