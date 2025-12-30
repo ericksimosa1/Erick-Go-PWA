@@ -1,7 +1,6 @@
 // public/sw.js
-// IMPORTANTE: QUEDA EN v7
-// No cambiar a v8 a menos que sea un despliegue real y nuevo.
-const CACHE_NAME = 'erick-go-cache-v7';
+// IMPORTANTE: CAMBIAR A V8 EN PUBLIC
+const CACHE_NAME = 'erick-go-cache-v8';
 
 const urlsToCache = [
   '/',
@@ -10,7 +9,7 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  console.log('[SW] Instalando Service Worker...');
+  console.log('[SW] Instalando Service Worker v8...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -28,10 +27,10 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  console.log('[SW] Activando Service Worker nuevo...');
+  console.log('[SW] Activando Service Worker v8...');
   
   event.waitUntil(
-    // Borra TODAS las cachés antiguas de Erick Go
+    // Borra TODAS las cachés antiguas (v7, v6, v5...)
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
@@ -171,7 +170,7 @@ self.addEventListener('notificationclick', event => {
             });
         })
         .catch(error => {
-            console.error('[SW] Error al hacer fetch a opt-out-reminder:', error);
+          console.error('[SW] Error al hacer fetch a opt-out-reminder:', error);
         })
         .finally(() => {
             return self.clients.openWindow('/login');

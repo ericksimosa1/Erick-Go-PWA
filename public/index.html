@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
@@ -14,16 +14,25 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     
-    <!-- Iconos para iOS (Safari los busca en el HTML, no solo en el manifest) -->
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- --- ICONOS --- -->
+    <link rel="apple-touch-icon" href="/erick-go-logo.png" />
+    <link rel="icon" type="image/png" href="/erick-go-logo.png" />
     
     <!-- --- MANIFEST --- -->
     <link rel="manifest" href="/manifest.json" />
-    <script type="module" crossorigin src="/assets/index-cee8a87d.js"></script>
-    <link rel="stylesheet" href="/assets/index-95b4ad4a.css">
   </head>
   <body>
     <div id="root"></div>
     
+    <!-- --- SCRIPT DEL SERVICE WORKER CON CACHE BUSTER V8 --- -->
+    <!-- Al poner ?v=8, obligamos al navegador a descargar el archivo SW nuevo -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          console.log('[HTML] Registrando Service Worker v8 desde public/index.html');
+          navigator.serviceWorker.register('/sw.js?v=8');
+        });
+      }
+    </script>
   </body>
 </html>
