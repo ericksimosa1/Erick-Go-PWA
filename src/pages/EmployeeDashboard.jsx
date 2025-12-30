@@ -19,7 +19,8 @@ export default function EmployeeDashboard() {
         notifyClosingTimeChange, 
         distributeClosingTimeToDrivers, 
         clearAllClosingTimesForToday,
-        fetchDriversByZone 
+        fetchDriversByZone,
+        hasDriverClosingRecordToday // <--- IMPORTANTE: Agregamos esta nueva función
     } = useFirestore();
     
     const [zones, setZones] = useState([]);
@@ -241,16 +242,72 @@ export default function EmployeeDashboard() {
             const selectedZoneObj = zones.find(z => z.id === zoneId);
             const zoneName = selectedZoneObj ? selectedZoneObj.nombre : 'Zona desconocida';
 
+            // 1. Registrar la asistencia
             await setOrUpdateAsistencia(user.uid, zoneId, user.nombre, selectedClientId);
             
             setMyAsistencia({ zona: zoneId });
             setSuccessMessage(`¡Tu asistencia ha sido registrada en: ${zoneName}!`);
             setTimeout(() => setSuccessMessage(''), 5000);
 
-            // --- ENVIAR NOTIFICACIÓN A LOS CONDUCTORES ---
-            console.log(">>> Enviando notificación a los conductores de la zona...");
+            // 2. Obtener conductores de esta zona
+            const driverIds = await fetchDriversByZone(selectedClientId, zoneId);
+            const validDriverIds = driverIds.filter(id => id && typeof id === 'string');
+
+            if (validDriverIds.length === 0) return;
+
+            // 3. Verificar si existe hora de cierre definida
+            const existingClosingTime = await getTodayClosingTime(selectedClientId);
+
+            if (existingClosingTime) {
+                // SI HAY HORA DE CIERRE: Verificamos conductor por conductor
+                console.log(">>> Hora de cierre definida. Verificando quién necesita el aviso...");
+
+                for (const driverId of validDriverIds) {
+                    // PREGUNTA CLAVE: ¿Ya tiene un registro de cierre este conductor hoy?
+                    const wasNotified = await hasDriverClosingRecordToday(selectedClientId, driverId);
+
+                    if (!wasNotified) {
+                        // NO TENÍA REGISTRO: Es su primer empleado o primer aviso.
+                        // 1. Creamos el registro de cierre para él (asignamos la hora global)
+                        await setClosingTimeForDriver(
+                            selectedClientId, 
+                            driverId, 
+                            existingClosingTime, 
+                            user, 
+                            user.nombre
+                        );
+                        console.log(`>>> Creando registro de cierre y enviando notificación al conductor ${driverId}...`);
+
+                        // 2. Le enviamos la notificación de cierre
+                        const notificationPayload = {
+                            title: 'Hora de Cierre Actualizada',
+                            body: `Se ha registrado un empleado en tu zona. El horario de cierre hoy es a las ${formatTime12Hour(existingClosingTime)}.`,
+                            icon: '/erick-go-logo.png',
+                            data: { url: '/conductor-dashboard' }
+                        };
+
+                        const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                        if (!isDev) {
+                            await fetch('/.netlify/functions/send-notification', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    userIds: [driverId],
+                                    payload: notificationPayload,
+                                    clientId: selectedClientId,
+                                }),
+                            });
+                        }
+                    } else {
+                        console.log(`>>> El conductor ${driverId} ya tenía registro de cierre. Se omite notificación de cierre.`);
+                    }
+                }
+            }
+
+            // 4. Notificar asistencia estándar (A TODOS los conductores de la zona, siempre)
+            console.log(">>> Enviando notificación de asistencia a conductores...");
             await sendAttendanceNotificationToDrivers(zoneId, zoneName);
-            console.log(">>> Notificación enviada.");
+            console.log(">>> Notificación de asistencia enviada.");
 
         } catch (error) {
             console.error("Error al registrar la asistencia:", error);
@@ -275,7 +332,9 @@ export default function EmployeeDashboard() {
                 throw new Error("Faltan datos para registrar la hora de cierre.");
             }
             
-            await setClosingTimeForDriver(selectedClientId, user, closingTimeValue, user, user.nombre);
+            // CORRECCIÓN CRÍTICA: Aquí pasábamos 'user' (objeto) en lugar de 'user.uid' (string)
+            // Esto causaba el error "n.indexOf is not a function" al intentar leer los datos corruptos.
+            await setClosingTimeForDriver(selectedClientId, user.uid, closingTimeValue, user.uid, user.nombre);
             
             console.log("Actualizando estado local...");
             setTodayClosingTime(closingTimeValue);

@@ -42,6 +42,7 @@ function AppContent() {
 
     // --- NUEVO ESTADO PARA ACTUALIZACIÓN AUTOMÁTICA ---
     const [showUpdatePrompt, setShowUpdatePrompt] = useState(false);
+    const [updateRegistration, setUpdateRegistration] = useState(null);
 
     // --- FUNCIÓN PARA ACTUALIZAR EL ESTADO DEL RECORDATORIO ---
     const updateReminderStatus = async (action) => {
@@ -68,50 +69,77 @@ function AppContent() {
         }
     };
 
-    // --- NUEVO: FUNCIÓN PARA FORZAR LA ACTUALIZACIÓN ---
+    // --- FUNCIÓN MEJORADA PARA FORZAR LA ACTUALIZACIÓN ---
     const handleUpdate = () => {
-        if (!('serviceWorker' in navigator)) return;
+        if (!('serviceWorker' in navigator)) {
+            window.location.reload(); // Fallback simple si no hay SW
+            return;
+        }
         
-        navigator.serviceWorker.getRegistration().then(registration => {
-            if (registration.waiting) {
-                // Enviamos el mensaje al SW definido en public/sw.js
-                registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-                setShowUpdatePrompt(false);
-                // Recargamos página
+        const registration = updateRegistration || navigator.serviceWorker.controller;
+        
+        if (registration) {
+            console.log('[APP] Enviando señal SKIP_WAITING al Service Worker...');
+            // 1. Enviar mensaje al SW para saltar la espera (activarse inmediatamente)
+            registration.postMessage({ type: 'SKIP_WAITING' });
+            
+            // 2. Esperar un instante para que procese el mensaje
+            setTimeout(() => {
+                console.log('[APP] Recargando página...');
                 window.location.reload();
-            }
-        }).catch(error => {
-            console.error("Error al actualizar:", error);
-        });
+            }, 500);
+        } else {
+            // En el caso raro de que no haya controlador, forzamos recarga
+            console.log('[APP] No hay SW controller, recargando forzado.');
+            window.location.reload();
+        }
     };
 
-    // --- EFECTO PARA REGISTRAR EL SERVICE WORKER (MODIFICADO) ---
+    // --- EFECTO PARA REGISTRAR EL SERVICE WORKER Y ESCUCHAR ACTUALIZACIONES ---
     useEffect(() => {
         const registerServiceWorker = async () => {
             // Solo registrar en producción
             if ('serviceWorker' in navigator && !import.meta.env.DEV) {
                 try {
+                    console.log('[APP] Registrando Service Worker...');
                     const registration = await navigator.serviceWorker.register('/sw.js');
-                    console.log('Service Worker registrado con éxito:', registration);
+                    console.log('[APP] Service Worker registrado con éxito:', registration);
+                    setUpdateRegistration(registration);
 
-                    // --- LÓGICA DE ACTUALIZACIÓN ---
+                    // --- LÓGICA DE ACTUALIZACIÓN DE PWA ---
+                    // Escucha cuando el navegador DESCARGA una nueva versión
                     registration.addEventListener('updatefound', (event) => {
                         const newWorker = registration.installing;
-                        if (!newWorker) return;
+                        const currentWorker = registration.waiting || registration.active;
 
-                        newWorker.addEventListener('statechange', () => {
-                            // Si el nuevo SW está instalado pero el viejo aún controla
-                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                console.log('Nueva versión disponible.');
-                                // Activamos la alerta en la UI
-                                setShowUpdatePrompt(true);
-                            }
-                        });
+                        console.log('[APP] Nueva versión de SW encontrada.');
+                        console.log('[APP] - Nuevo Worker (installing):', newWorker);
+                        console.log('[APP] - Worker actual (waiting):', registration.waiting);
+                        console.log('[APP] - Worker activo (active):', registration.active);
+
+                        // Si hay un worker nuevo instalándose...
+                        if (newWorker) {
+                            newWorker.addEventListener('statechange', () => {
+                                console.log('[APP] Estado del nuevo SW cambiado a:', newWorker.state);
+                                    
+                                // Si el nuevo SW se instaló, pero el viejo aún controla, mostramos alerta
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    console.log('[APP] Nuevo SW listo para activarse. Mostrando alerta UI.');
+                                    setShowUpdatePrompt(true);
+                                }
+                            });
+                        } else if (registration.waiting) {
+                            // Si el nuevo SW ya está esperando para activarse, mostramos alerta también
+                            console.log('[APP] Nuevo SW esperando (waiting). Mostrando alerta UI.');
+                            setShowUpdatePrompt(true);
+                        }
                     });
 
                 } catch (error) {
-                    console.error('Error al registrar el Service Worker:', error);
+                    console.error('[APP] Error al registrar el Service Worker:', error);
                 }
+            } else {
+                console.log('[APP] Service Worker deshabilitado o en modo desarrollo.');
             }
         };
         registerServiceWorker();
@@ -132,7 +160,7 @@ function AppContent() {
                 const action = url.searchParams.get('action');
 
                 if (action) {
-                    console.log(`Acción recibida del Service Worker: ${action}`);
+                    console.log(`[APP] Acción recibida del SW: ${action}`);
                     if (action === 'going_on_my_own' || action === 'free') {
                         updateReminderStatus(action);
                     }
@@ -147,10 +175,10 @@ function AppContent() {
         return () => navigator.serviceWorker.removeEventListener('message', handleMessage);
     }, [user]);
 
-    // --- FUNCIÓN PARA SUSCRIBIR AL USUARIO (VERSIÓN MEJORADA) ---
+    // --- FUNCIÓN PARA SUSCRIBIR AL USUARIO ---
     const subscribeUserToPush = async () => {
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-            console.warn('Las notificaciones push no son compatibles con este navegador.');
+            console.warn('[APP] Las notificaciones push no son compatibles con este navegador.');
             setSubscriptionError('Tu navegador no es compatible con notificaciones push.');
             return;
         }
@@ -175,7 +203,7 @@ function AppContent() {
                         
                         await processSubscription(registration);
                     } catch (error) {
-                        console.error('Error al solicitar permiso de notificación:', error);
+                        console.error('[APP] Error al solicitar permiso de notificación:', error);
                         setSubscriptionError('Error al solicitar permiso de notificación. Inténtalo de nuevo.');
                         setShowPermissionSnackbar(false);
                     }
@@ -186,7 +214,7 @@ function AppContent() {
                 setSubscriptionError('Has denegado previamente el permiso para recibir notificaciones. Puedes cambiarlo en la configuración de tu navegador.');
             }
         } catch (error) {
-            console.error('Error al suscribir al usuario a notificaciones push:', error);
+            console.error('[APP] Error al suscribir al usuario a notificaciones push:', error);
             
             if (error.name === 'AbortError' && error.message.includes('push service error')) {
                 setSubscriptionError('No se pudo suscribir a las notificaciones. El navegador podría estar bloqueando el servicio de push.');
@@ -214,13 +242,13 @@ function AppContent() {
             if (!import.meta.env.DEV) {
                 await saveSubscriptionToBackend(subscription);
             } else {
-                console.log('Modo desarrollo: Omitiendo guardado de suscripción en el backend');
+                console.log('[APP] Modo desarrollo: Omitiendo guardado de suscripción en el backend');
             }
             
-            console.log('Usuario suscrito a notificaciones push.');
+            console.log('[APP] Usuario suscrito a notificaciones push.');
             setSubscriptionError('');
         } catch (error) {
-            console.error('Error al procesar la suscripción:', error);
+            console.error('[APP] Error al procesar la suscripción:', error);
             setSubscriptionError('Error al procesar la suscripción. Inténtalo de nuevo.');
         }
     };
@@ -240,9 +268,9 @@ function AppContent() {
             });
             if (!response.ok) throw new Error('Error al guardar la suscripción en el backend.');
             const data = await response.json();
-            console.log('Suscripción guardada en el backend:', data);
+            console.log('[APP] Suscripción guardada en el backend:', data);
         } catch (error) {
-            console.error('Error en saveSubscriptionToBackend:', error);
+            console.error('[APP] Error en saveSubscriptionToBackend:', error);
             setSubscriptionError('Error al guardar la suscripción en el servidor. Inténtalo de nuevo.');
         }
     };
@@ -270,7 +298,7 @@ function AppContent() {
 
     return (
         <>
-            {/* --- ALERTA DE ACTUALIZACIÓN DE PWA (NUEVO) --- */}
+            {/* --- ALERTA DE ACTUALIZACIÓN DE PWA (MEJORADA) --- */}
             <Snackbar 
                 open={showUpdatePrompt} 
                 anchorOrigin={{ vertical: 'top', horizontal: 'center' }}

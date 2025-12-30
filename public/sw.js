@@ -1,5 +1,8 @@
 // public/sw.js
-const CACHE_NAME = 'erick-go-cache-v5';
+// IMPORTANTE: CAMBIA ESTE NÚMERO (v6, v7, v8...) EN CADA ACTUALIZACIÓN IMPORTANTE
+// Esto "romperá" la caché vieja de los móviles y forzará la descarga del nuevo código.
+const CACHE_NAME = 'erick-go-cache-v6';
+
 const urlsToCache = [
   '/',
   '/erick-go-logo.png',
@@ -7,45 +10,59 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  console.log('Service Worker: Instalando...');
+  console.log('[SW] Instalando Service Worker...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Service Worker: Cache abierto y archivos guardados');
+        console.log('[SW] Cache abierto. Guardando archivos...');
         return cache.addAll(urlsToCache);
       })
+      .then(() => {
+        console.log('[SW] Archivos cacheados. Saltando espera para activación inmediata.');
+        // Esto fuerza al SW a convertirse en el controlador activo inmediatamente
+        return self.skipWaiting();
+      })
       .catch(error => {
-        console.error('Error al abrir la caché:', error);
+        console.error('[SW] Error al abrir la caché:', error);
       })
   );
 });
 
 self.addEventListener('activate', event => {
-  console.log('Service Worker: Activando...');
-  const cacheWhitelist = [CACHE_NAME];
+  console.log('[SW] Activando Service Worker nuevo...');
+  
   event.waitUntil(
+    // Borra TODAS las cachés antiguas de Erick Go para evitar datos corruptos o estancados
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
-          if (cacheWhitelist.indexOf(cacheName) === -1) {
-            console.log('Service Worker: Eliminando caché antigua:', cacheName);
+          if (cacheName !== CACHE_NAME) {
+            console.log(`[SW] Eliminando caché antigua: ${cacheName}`);
             return caches.delete(cacheName);
           }
+          return Promise.resolve();
         })
       );
+    }).then(() => {
+      console.log('[SW] Cachés antiguas limpiadas. Reclamando clientes...');
+      // Esto asegura que la nueva PWA controle todas las pestañas abiertas inmediatamente
+      return self.clients.claim();
     })
   );
-  // Nota: El método correcto es claim(), no cliam().
-  return self.clients.claim();
 });
 
 self.addEventListener('fetch', event => {
   // NO INTERCEPTAR PETICIONES A FUNCIONES DE NETLIFY EN MODO DESARROLLO
-  if (event.request.url.includes('localhost:5173') || 
-      event.request.url.includes('.netlify/functions')) {
-    return;
+  // (Para evitar errores al conectar a Netlify Local)
+  const isDev = event.request.url.includes('localhost:5173') || 
+                event.request.url.includes('127.0.0.1:5173') || // VSCode Live Server
+                event.request.url.includes('.netlify/functions'); // Llamadas API
+
+  if (isDev) {
+    return; // Dejar pasar en desarrollo
   }
 
+  // Estrategia Network First con Fallback a Caché para recursos estáticos
   if (event.request.method === 'GET' && event.request.url.startsWith(self.location.origin)) {
     event.respondWith(
       caches.match(event.request)
@@ -54,6 +71,7 @@ self.addEventListener('fetch', event => {
             return response;
           }
           return fetch(event.request).then(response => {
+            // Si la respuesta no es válida o es un error, no la guardes en caché
             if (!response || response.status !== 200 || response.type !== 'basic') {
               return response;
             }
@@ -67,13 +85,13 @@ self.addEventListener('fetch', event => {
         })
     );
   } else {
-    return;
+    return; // Para peticiones POST o externas, dejarlas fluir
   }
 });
 
 // --- LÓGICA DE NOTIFICACIONES PUSH ---
 self.addEventListener('push', event => {
-  console.log('Service Worker: Notificación push recibida.', event);
+  console.log('[SW] Notificación push recibida.', event);
 
   let payload = {
     title: 'Erick Go PWA',
@@ -81,7 +99,7 @@ self.addEventListener('push', event => {
     icon: '/erick-go-logo.png',
     badge: '/erick-go-logo.png',
     data: {
-      url: '/login',
+      url: '/login', // URL por defecto si la notificación no trae una
       primaryKey: 1
     }
   };
@@ -91,7 +109,7 @@ self.addEventListener('push', event => {
       const dataFromServer = event.data.json();
       payload = { ...payload, ...dataFromServer };
     } catch (e) {
-      console.error('Service Worker: Error al parsear el payload de la notificación:', e);
+      console.error('[SW] Error al parsear el payload de la notificación:', e);
     }
   }
 
@@ -101,10 +119,10 @@ self.addEventListener('push', event => {
     badge: payload.badge,
     vibrate: [100, 50, 100],
     data: payload.data,
-    requireInteraction: true,
-    actions: payload.actions || [], 
+    requireInteraction: true, // Requiere interacción para abrir app
+    actions: payload.actions || [], // Botones de acción (si los hay)
     tag: payload.tag || 'erick-go-notification',
-    renotify: true,
+    renotify: true, // Si llega una nueva, reemplaza a la anterior
     silent: false,
   };
 
@@ -113,41 +131,37 @@ self.addEventListener('push', event => {
   );
 });
 
-// --- NUEVA LÓGICA PARA MANEJO DE CLICS EN NOTIFICACIONES ---
+// --- MANEJO DE CLICKS EN NOTIFICACIONES ---
 self.addEventListener('notificationclick', event => {
-  console.log('Service Worker: Notificación clickeada.', event);
-  
+  console.log('[SW] Notificación clickeada.', event);  
   event.notification.close();
 
-  // MANEJO DE ACCIONES INTERACTIVAS
+  // MANEJO DE ACCIONES DEFINIDAS (si agregaste botones en la notificación del servidor)
   if (event.action === 'register_attendance') {
-    console.log('Usuario quiere registrar asistencia.');
-    event.waitUntil(
-      self.clients.openWindow('/login') // Corrección: self.clients.openWindow
-    );
+    console.log('[SW] Usuario quiere registrar asistencia.');
+    event.waitUntil(self.clients.openWindow('/login')); // Abre la app principal
     return;
   }
 
   if (event.action === 'opt_out_transport') {
-    console.log('Usuario ha optado por no usar transporte hoy.');
-    
+    console.log('[SW] Usuario ha optado por no usar transporte hoy.');
     const userId = event.notification.data.userId;
     const clientId = event.notification.data.clientId;
 
     if (!userId || !clientId) {
-        console.error('Faltan userId o clientId en los datos de la notificación para opt-out.');
+        console.error('[SW] Faltan userId o clientId en los datos de la notificación para opt-out.');
         event.waitUntil(self.clients.openWindow('/login'));
         return;
     }
 
-    if (self.location.hostname === 'localhost') {
-      console.log('Modo desarrollo: Simulando opt-out para userId:', userId, 'clientId:', clientId);
-      event.waitUntil(
-        self.clients.openWindow('/login')
-      );
+    // Si estamos en desarrollo, solo abrimos la ventana sin llamar a la función
+    if (self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1') {
+      console.log('[SW] Modo desarrollo: Simulando opt-out.');
+      event.waitUntil(self.clients.openWindow('/login'));
       return;
     }
 
+    // Llamada a la función de Netlify para recordatorio
     event.waitUntil(
         fetch('/.netlify/functions/opt-out-reminder', {
             method: 'POST',
@@ -156,9 +170,10 @@ self.addEventListener('notificationclick', event => {
         })
         .then(response => {
             if (!response.ok) {
-                throw new Error('Error al registrar opt-out en el servidor.');
+                throw new Error('[SW] Error al registrar opt-out en el servidor.');
             }
-            console.log('Opt-out registrado exitosamente.');
+            console.log('[SW] Opt-out registrado exitosamente.');
+            // Mostrar un mensaje de confirmación al usuario
             return self.registration.showNotification('¡Entendido!', {
                 body: 'No recibirás más recordatorios de transporte hoy.',
                 icon: '/erick-go-logo.png',
@@ -166,15 +181,17 @@ self.addEventListener('notificationclick', event => {
             });
         })
         .catch(error => {
-            console.error('Error al hacer fetch a opt-out-reminder:', error);
+            console.error('[SW] Error al hacer fetch a opt-out-reminder:', error);
         })
         .finally(() => {
+            // Siempre redirigir al login al final
             return self.clients.openWindow('/login');
         })
     );
     return;
   }
   
+  // Si no hay acción específica, abrir la URL definida en la notificación o el login
   let urlToOpen = event.notification.data.url || '/login';
 
   event.waitUntil(
@@ -182,11 +199,13 @@ self.addEventListener('notificationclick', event => {
       type: 'window', 
       includeUncontrolled: true 
     }).then(clientList => {
+      // Intentar enfocar la ventana actual primero
       for (const client of clientList) {
         if (client.url === urlToOpen && 'focus' in client) {
           return client.focus();
         }
       }
+      // Si no se encontró, abrir una nueva
       if (self.clients.openWindow) {
         return self.clients.openWindow(urlToOpen);
       }
@@ -194,11 +213,14 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
-// --- NUEVO: MANEJO DE ACTUALIZACIÓN INMEDIATA DEL SW ---
+// --- MANEJO DE MENSAJES DESDE LA APP (ACTUALIZACIÓN) ---
 // Este bloque es CRUCIAL para que funcione el botón "ACTUALIZAR"
 self.addEventListener('message', (event) => {
-    // Si recibimos el comando 'SKIP_WAITING', obligamos al SW a activarse inmediatamente
-    if (event.data === 'SKIP_WAITING') {
-        self.skipWaiting();
-    }
+  console.log('[SW] Mensaje recibido de la app:', event.data);
+  
+  // Si recibimos el comando 'SKIP_WAITING', obligamos al SW nuevo a activarse inmediatamente
+  if (event.data === 'SKIP_WAITING') {
+    console.log('[SW] Comando SKIP_WAITING recibido. Activando nuevo SW...');
+    self.skipWaiting();
+  }
 });

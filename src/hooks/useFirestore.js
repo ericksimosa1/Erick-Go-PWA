@@ -503,10 +503,9 @@ export const useFirestore = () => {
             const tomorrow = new Date(today);
             tomorrow.setDate(today.getDate() + 1);
             
-            // CORRECCIÓN: Simplificar la consulta para evitar el error de índice
             const closingCollection = collection(db, 'cierres');
             
-            // Primero buscar por clientId y fecha
+            // Buscar por clientId y fecha (Consulta simple, requiere índice estándar o auto)
             const q1 = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -515,15 +514,12 @@ export const useFirestore = () => {
             );
             
             const querySnapshot1 = await getDocs(q1);
-            console.log(`getTodayClosingTimeForDriver: Se encontraron ${querySnapshot1.size} registros de cierre para la empresa ${clientId}`);
             
-            // Luego filtrar por userId en el cliente
+            // Filtrar por userId en el cliente (JavaScript)
             const closingRecords = querySnapshot1.docs.filter(doc => doc.data().userId === driverId);
-            console.log(`getTodayClosingTimeForDriver: Se encontraron ${closingRecords.length} registros para el conductor ${driverId}`);
             
             if (closingRecords.length > 0) {
                 const doc = closingRecords[0];
-                console.log(`getTodayClosingTimeForDriver: Hora de cierre encontrada: ${doc.data().horaCierre}`);
                 return doc.data().horaCierre;
             }
             return null;
@@ -534,6 +530,7 @@ export const useFirestore = () => {
     }, []);
 
     // Establecer la hora de cierre para un conductor específico
+    // CORREGIDO: Se simplifica la consulta para evitar error de índice compuesto
     const setClosingTimeForDriver = useCallback(async (clientId, driverId, time, registeredBy, registeredByName) => {
         try {
             const today = new Date();
@@ -541,10 +538,9 @@ export const useFirestore = () => {
             const tomorrow = new Date(today);
             tomorrow.setDate(today.getDate() + 1);
             
-            // CORRECCIÓN: Usar la colección 'cierres' en lugar de 'closingTimes'
             const closingCollection = collection(db, 'cierres');
             
-            // Verificar si ya existe un registro para hoy
+            // 1. Buscar todos los cierres para la empresa hoy (Query simple)
             const q = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -554,6 +550,9 @@ export const useFirestore = () => {
             
             const querySnapshot = await getDocs(q);
             
+            // 2. Filtrar en JS para encontrar si ya existe registro para ESTE conductor
+            const existingRecord = querySnapshot.docs.find(doc => doc.data().userId === driverId);
+            
             const closingData = { 
                 clientId: clientId, 
                 horaCierre: time, 
@@ -562,10 +561,12 @@ export const useFirestore = () => {
                 fecha: Timestamp.now() 
             };
             
-            if (querySnapshot.empty) {
+            if (!existingRecord) {
+                // No existe, crear uno nuevo
                 await addDoc(closingCollection, closingData);
             } else {
-                await updateDoc(doc(db, 'cierres', querySnapshot.docs[0].id), closingData);
+                // Ya existe, actualizarlo
+                await updateDoc(doc(db, 'cierres', existingRecord.id), closingData);
             }
             
             return true;
@@ -576,6 +577,7 @@ export const useFirestore = () => {
     }, []);
 
     // CORRECCIÓN: Función para limpiar la hora de cierre de un conductor específico
+    // CORREGIDO: Se simplifica la consulta para evitar error de índice compuesto
     const clearTodayClosingTimeForDriver = useCallback(async (clientId, driverId) => {
         try {
             const today = new Date();
@@ -583,9 +585,9 @@ export const useFirestore = () => {
             const tomorrow = new Date(today);
             tomorrow.setDate(today.getDate() + 1);
             
-            // CORRECCIÓN: Usar la colección 'cierres' en lugar de 'closingTimes'
             const closingCollection = collection(db, 'cierres');
             
+            // 1. Buscar todos los cierres para la empresa hoy
             const q = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -595,27 +597,12 @@ export const useFirestore = () => {
             
             const querySnapshot = await getDocs(q);
             
-            // Filtrar por userId en el cliente
-            const closingRecords = querySnapshot.docs.filter(doc => doc.data().userId === driverId);
+            // 2. Filtrar para encontrar el registro específico de este conductor
+            const driverRecord = querySnapshot.docs.find(doc => doc.data().userId === driverId);
             
-            if (closingRecords.length > 0) {
-                const docRef = closingRecords[0].ref;
-                await deleteDoc(docRef);
+            if (driverRecord) {
+                await deleteDoc(driverRecord.ref);
                 console.log(`Hora de cierre del conductor ${driverId} para hoy ha sido eliminada.`);
-                
-                // CORRECCIÓN: También eliminar cualquier registro de cierre de la empresa
-                // para asegurar que no quede ninguna hora de cierre residual
-                const companyClosingRecords = querySnapshot.docs.filter(doc => 
-                    !doc.data().userId || doc.data().isCompanyWide
-                );
-                
-                if (companyClosingRecords.length > 0) {
-                    for (const record of companyClosingRecords) {
-                        await deleteDoc(record.ref);
-                        console.log(`Registro de cierre de empresa eliminado para evitar conflictos.`);
-                    }
-                }
-                
                 return true;
             }
             
@@ -674,9 +661,9 @@ export const useFirestore = () => {
             const tomorrow = new Date(today);
             tomorrow.setDate(today.getDate() + 1);
             
-            // CORRECCIÓN: Usar la colección 'cierres' en lugar de 'closingTimes'
             const closingCollection = collection(db, 'cierres');
             
+            // Buscar todos los registros de hoy y filtrar por userId
             const q = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -685,13 +672,10 @@ export const useFirestore = () => {
             );
             
             const querySnapshot = await getDocs(q);
+            const driverRecord = querySnapshot.docs.find(doc => doc.data().userId === driverId);
             
-            // Filtrar por userId en el cliente
-            const closingRecords = querySnapshot.docs.filter(doc => doc.data().userId === driverId);
-            
-            if (closingRecords.length > 0) {
-                const docRef = closingRecords[0].ref;
-                await updateDoc(docRef, {
+            if (driverRecord) {
+                await updateDoc(driverRecord.ref, {
                     jornadaFinalizada: true
                 });
             }
@@ -887,7 +871,7 @@ export const useFirestore = () => {
         // Convertir a formato 12h
         hoursNum = hoursNum % 12 || 12;
         
-        // Formatear con ceros a la izquierda
+        // Formatear con ceros a la izquierda si es necesario
         const formattedHours = hoursNum.toString().padStart(2, '0');
         const formattedMinutes = minutesNum.toString().padStart(2, '0');
         
@@ -969,6 +953,7 @@ export const useFirestore = () => {
 
     // ====================================================================
     // CORRECCIÓN IMPORTANTE: Función para obtener tanto la hora de cierre del conductor como la de la empresa
+    // CON LIMPIEZA DE DATOS CORRUPTOS (FIX FINAL)
     // ====================================================================
     const getTodayClosingTimes = useCallback(async (clientId, driverId) => {
         try {
@@ -990,17 +975,6 @@ export const useFirestore = () => {
             const querySnapshot = await getDocs(q);
             console.log(`getTodayClosingTimes: Se encontraron ${querySnapshot.size} registros de cierre para la empresa ${clientId}`);
             
-            // CORRECCIÓN: Registrar todos los documentos encontrados para depuración
-            for (const docSnapshot of querySnapshot.docs) {
-                const data = docSnapshot.data();
-                console.log(`Registro de cierre encontrado:`, {
-                    id: docSnapshot.id,
-                    userId: data.userId,
-                    horaCierre: data.horaCierre,
-                    isCompanyWide: data.isCompanyWide || false
-                });
-            }
-            
             // Buscar cierre específico del conductor y cierre de la empresa
             let driverClosingTime = null;
             let companyClosingTime = null;
@@ -1018,6 +992,15 @@ export const useFirestore = () => {
             // CORRECCIÓN: Usar for...of en lugar de forEach para poder usar await
             for (const queryDocSnapshot of querySnapshot.docs) {
                 const data = queryDocSnapshot.data();
+
+                // ====================================================================
+                // PROTECCIÓN: Ignorar registros corruptos (userId que no es string)
+                // ====================================================================
+                if (!data.userId || typeof data.userId !== 'string') {
+                    console.warn(`[LIMPIEZA] Saltando registro de cierre corrupto (ID: ${queryDocSnapshot.id}). userId no es string.`);
+                    continue; // <--- CLAVE: Saltar este registro corrupto y pasar al siguiente
+                }
+                // ================================================================================
                 
                 // Si el registro coincide con el ID del conductor
                 if (data.userId === driverId) {
@@ -1062,6 +1045,52 @@ export const useFirestore = () => {
                 companyClosingTime: null,
                 hasAnyClosingTime: false
             };
+        }
+    }, []);
+
+    // ====================================================================
+    // NUEVA FUNCIÓN: hasDriverClosingRecordToday
+    // Verifica si un conductor ya tiene un registro de cierre hoy (memoria de notificación)
+    // CORREGIDO: Simplificación de consulta para evitar índice compuesto
+    // ====================================================================
+    const hasDriverClosingRecordToday = useCallback(async (clientId, driverId) => {
+        try {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(today.getDate() + 1);
+            
+            const closingCollection = collection(db, 'cierres');
+            
+            // Buscamos todos los registros para la empresa hoy (Query simple)
+            const q = query(
+                closingCollection,
+                where('clientId', '==', clientId),
+                where('fecha', '>=', Timestamp.fromDate(today)),
+                where('fecha', '<', Timestamp.fromDate(tomorrow))
+            );
+            
+            const querySnapshot = await getDocs(q);
+            
+            // Filtramos en JS para ver si existe uno específico para este conductor
+            const driverRecord = querySnapshot.docs.find(doc => {
+                const data = doc.data();
+                // ====================================================================
+                // PROTECCIÓN: Ignorar registros corruptos
+                // ====================================================================
+                if (!data.userId || typeof data.userId !== 'string') {
+                    return false;
+                }
+                // ================================================================================
+                return data.userId === driverId;
+            });
+            
+            // Si encuentra un documento, significa que ya fue notificado (o tiene hora asignada)
+            return !!driverRecord;
+            
+        } catch (error) {
+            console.error("Error al verificar registro de cierre del conductor:", error);
+            return false; // Si hay error, asumimos que no se ha notificado para no dejarlo sin info
         }
     }, []);
 
@@ -1303,6 +1332,10 @@ export const useFirestore = () => {
         notifyClosingTimeChange,
         listenToClosingTimeChanges,
         getTodayClosingTimes,
+        // ====================================================================
+        // NUEVA FUNCIÓN DE MEMORIA DE CIERRE
+        // ====================================================================
+        hasDriverClosingRecordToday,
         // ====================================================================
         // CORRECCIÓN: NUEVAS FUNCIONES PARA DISTRIBUIR HORA DE CIERRE A CONDUCTORES
         // ====================================================================
