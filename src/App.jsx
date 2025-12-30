@@ -47,13 +47,13 @@ function AppContent() {
     // --- FUNCIÓN PARA ACTUALIZAR EL ESTADO DEL RECORDATORIO ---
     const updateReminderStatus = async (action) => {
         if (!user?.uid) {
-            console.error('No se puede actualizar el recordatorio sin un usuario logueado.');
+            console.error('[APP] No se puede actualizar el recordatorio sin un usuario logueado.');
             return;
         }
-        console.log(`Actualizando estado de recordatorio a: ${action} para el usuario: ${user.uid}`);
+        console.log(`[APP] Actualizando estado de recordatorio a: ${action} para el usuario: ${user.uid}`);
         
         if (import.meta.env.DEV) {
-            console.log('Modo desarrollo: Omitiendo llamada a update-reminder-status');
+            console.log('[APP] Modo desarrollo: Omitiendo llamada a update-reminder-status');
             return;
         }
         
@@ -63,16 +63,22 @@ function AppContent() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId: user.uid, action: action }),
             });
-            console.log('Estado de recordatorio actualizado correctamente.');
+            console.log('[APP] Estado de recordatorio actualizado correctamente.');
         } catch (error) {
-            console.error('Error al actualizar el estado del recordatorio:', error);
+            console.error('[APP] Error al actualizar el estado del recordatorio:', error);
         }
     };
 
-    // --- FUNCIÓN MEJORADA PARA FORZAR LA ACTUALIZACIÓN ---
+    // --- FUNCIÓN PARA FORZAR LA ACTUALIZACIÓN ---
     const handleUpdate = () => {
+        console.log('[APP] Usuario solicitó actualización...');
+        
+        // 1. OCULTAR EL BOTÓN INMEDIATAMENTE (Para que el usuario sepa que funcionó)
+        setShowUpdatePrompt(false);
+        
         if (!('serviceWorker' in navigator)) {
-            window.location.reload(); // Fallback simple si no hay SW
+            console.log('[APP] No hay SW. Recargando página normal.');
+            window.location.reload(true); 
             return;
         }
         
@@ -80,18 +86,18 @@ function AppContent() {
         
         if (registration) {
             console.log('[APP] Enviando señal SKIP_WAITING al Service Worker...');
-            // 1. Enviar mensaje al SW para saltar la espera (activarse inmediatamente)
+            // 2. Enviar mensaje AL SERVICIO WORKER como un OBJETO
             registration.postMessage({ type: 'SKIP_WAITING' });
             
-            // 2. Esperar un instante para que procese el mensaje
+            // 3. Esperar un instante para que procese el mensaje y recargar
             setTimeout(() => {
                 console.log('[APP] Recargando página...');
-                window.location.reload();
-            }, 500);
+                window.location.reload(true);
+            }, 800);
         } else {
             // En el caso raro de que no haya controlador, forzamos recarga
             console.log('[APP] No hay SW controller, recargando forzado.');
-            window.location.reload();
+            window.location.reload(true);
         }
     };
 
@@ -107,7 +113,6 @@ function AppContent() {
                     setUpdateRegistration(registration);
 
                     // --- LÓGICA DE ACTUALIZACIÓN DE PWA ---
-                    // Escucha cuando el navegador DESCARGA una nueva versión
                     registration.addEventListener('updatefound', (event) => {
                         const newWorker = registration.installing;
                         const currentWorker = registration.waiting || registration.active;
@@ -155,6 +160,7 @@ function AppContent() {
     // --- EFECTO PARA ESCUCHAR MENSAJES DEL SERVICE WORKER ---
     useEffect(() => {
         const handleMessage = (event) => {
+            // Nota: event.data puede ser un objeto
             if (event.data && event.data.type === 'NAVIGATE') {
                 const url = new URL(event.data.payload.url, window.location.origin);
                 const action = url.searchParams.get('action');
