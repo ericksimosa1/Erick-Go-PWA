@@ -1099,6 +1099,7 @@ export const useFirestore = () => {
     // ====================================================================
     
     // Función para distribuir la hora de cierre a todos los conductores con empleados disponibles
+    // CORREGIDO: INCLUIR NOMBRE DE LA EMPRESA EN LA NOTIFICACIÓN
     const distributeClosingTimeToDrivers = useCallback(async (clientId, closingTime, currentUser) => {
         try {
             // CORRECCIÓN: Verificar que currentUser existe y tiene uid
@@ -1106,6 +1107,15 @@ export const useFirestore = () => {
                 console.error('Error: currentUser no está definido o no tiene uid');
                 return false;
             }
+
+            // ====================================================================
+            // NUEVO: OBTENER EL NOMBRE DE LA EMPRESA
+            // ====================================================================
+            const allClients = await fetchClients();
+            const currentClient = allClients.find(c => c.id === clientId);
+            const companyName = currentClient ? currentClient.nombre : 'tu empresa';
+            console.log(`[distributeClosingTimeToDrivers] Empresa detectada: ${companyName} (ID: ${clientId})`);
+            // ====================================================================
 
             // Obtener todos los usuarios de la empresa
             const users = await fetchUsersByClient(clientId);
@@ -1162,12 +1172,17 @@ export const useFirestore = () => {
                 console.log(`Enviando notificaciones de cambio de hora a ${driversToNotify.length} conductores...`);
                 console.log("Lista de IDs a notificar:", driversToNotify);
                 
+                // ====================================================================
+                // NUEVO CUERPO DE NOTIFICACIÓN CON NOMBRE DE EMPRESA
+                // ====================================================================
                 const notificationPayload = {
                     title: 'Hora de Cierre Actualizada',
-                    body: `El encargado ${currentUser.nombre} ha establecido la hora de cierre a las ${closingTime}.`,
+                    // Ahora el mensaje es claro: "establecido para Croii Soledad..."
+                    body: `El encargado ${currentUser.nombre} ha establecido la hora de cierre para ${companyName} a las ${closingTime}.`,
                     icon: '/erick-go-logo.png',
                     data: { url: '/conductor-dashboard' }
                 };
+                // ====================================================================
 
                 try {
                     const response = await fetch('/.netlify/functions/send-notification', {
@@ -1200,7 +1215,7 @@ export const useFirestore = () => {
             console.error('Error al distribuir la hora de cierre a los conductores:', error);
             return false;
         }
-    }, [fetchUsersByClient, fetchTodayAsistencias, setClosingTimeForDriver]);
+    }, [fetchUsersByClient, fetchTodayAsistencias, fetchClients, setClosingTimeForDriver]);
 
     // ====================================================================
     // CORRECCIÓN: NUEVA FUNCIÓN PARA VERIFICAR CONDUCTORES CON EMPLEADOS PENDIENTES
