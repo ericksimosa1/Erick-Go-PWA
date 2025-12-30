@@ -1,6 +1,6 @@
 // public/sw.js
-// IMPORTANTE: MANTENER EN v7 PARA PRODUCCIÓN
-// No cambiar a v8 a menos que sea un nuevo deploy real.
+// IMPORTANTE: QUEDA EN v7
+// No cambiar a v8 a menos que sea un despliegue real y nuevo.
 const CACHE_NAME = 'erick-go-cache-v7';
 
 const urlsToCache = [
@@ -171,7 +171,7 @@ self.addEventListener('notificationclick', event => {
             });
         })
         .catch(error => {
-          console.error('[SW] Error al hacer fetch a opt-out-reminder:', error);
+            console.error('[SW] Error al hacer fetch a opt-out-reminder:', error);
         })
         .finally(() => {
             return self.clients.openWindow('/login');
@@ -204,12 +204,8 @@ self.addEventListener('message', (event) => {
     console.log('[SW] Mensaje recibido de la app:', event.data);
     console.log('[SW] Tipo de dato recibido:', typeof event.data);
     
-    // --- CORRECCIÓN DEL BUG IMPORTANTE ---
-    // La app envía un objeto: { type: 'SKIP_WAITING' }
-    // Debemos verificar que es un objeto y que tiene la propiedad 'type'
     if (event.data && event.data.type === 'SKIP_WAITING') {
         console.log('[SW] Comando SKIP_WAITING recibido. Saltando espera y activando nuevo SW...');
         self.skipWaiting();
-        // Opcional: self.clients.claim();
     }
 });

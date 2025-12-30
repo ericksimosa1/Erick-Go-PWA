@@ -69,9 +69,9 @@ function AppContent() {
         }
     };
 
-    // --- FUNCIÓN PARA FORZAR LA ACTUALIZACIÓN ---
-    const handleUpdate = () => {
-        console.log('[APP] Usuario solicitó actualización...');
+    // --- FUNCIÓN FINAL: FORZAR DESREGISTRACIÓN Y RECARGA (OPCIÓN NUCLEAR) ---
+    const handleUpdate = async () => {
+        console.log('[APP] Botón ACTUALIZAR presionado. Iniciando procedimiento nuclear...');
         
         // 1. OCULTAR EL BOTÓN INMEDIATAMENTE (Para que el usuario sepa que funcionó)
         setShowUpdatePrompt(false);
@@ -82,21 +82,27 @@ function AppContent() {
             return;
         }
         
-        const registration = updateRegistration || navigator.serviceWorker.controller;
-        
-        if (registration) {
-            console.log('[APP] Enviando señal SKIP_WAITING al Service Worker...');
-            // 2. Enviar mensaje AL SERVICIO WORKER como un OBJETO
-            registration.postMessage({ type: 'SKIP_WAITING' });
+        try {
+            // Obtenemos el registro del SW ACTIVO (el viejo que queremos matar)
+            const registration = await navigator.serviceWorker.getRegistration();
             
-            // 3. Esperar un instante para que procese el mensaje y recargar
-            setTimeout(() => {
-                console.log('[APP] Recargando página...');
+            if (registration) {
+                console.log('[APP] SW activo encontrado. Ejecutando unregister() para destruirlo.');
+                // 2. AQUÍ ESTÁ LA MAGIA: unregister() mata al SW viejo instantáneamente
+                await registration.unregister();
+                
+                // 3. Esperamos un poco y recargamos
+                setTimeout(() => {
+                    console.log('[APP] SW desregistrado. Recargando página...');
+                    window.location.reload(true);
+                }, 500);
+            } else {
+                console.log('[APP] No hay SW registrado (desinstalado). Recargando forzado.');
                 window.location.reload(true);
-            }, 800);
-        } else {
-            // En el caso raro de que no haya controlador, forzamos recarga
-            console.log('[APP] No hay SW controller, recargando forzado.');
+            }
+        } catch (error) {
+            console.error('[APP] Error al desregistrar SW:', error);
+            // Fallback: si falla la desregistración, recargamos igual
             window.location.reload(true);
         }
     };
@@ -127,14 +133,14 @@ function AppContent() {
                             newWorker.addEventListener('statechange', () => {
                                 console.log('[APP] Estado del nuevo SW cambiado a:', newWorker.state);
                                     
-                                // Si el nuevo SW se instaló, pero el viejo aún controla, mostramos alerta
+                                // Si el nuevo SW se instaló, mostramos alerta
                                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
                                     console.log('[APP] Nuevo SW listo para activarse. Mostrando alerta UI.');
                                     setShowUpdatePrompt(true);
                                 }
                             });
                         } else if (registration.waiting) {
-                            // Si el nuevo SW ya está esperando para activarse, mostramos alerta también
+                            // Si el nuevo SW ya está esperando, mostramos alerta también
                             console.log('[APP] Nuevo SW esperando (waiting). Mostrando alerta UI.');
                             setShowUpdatePrompt(true);
                         }
@@ -160,7 +166,7 @@ function AppContent() {
     // --- EFECTO PARA ESCUCHAR MENSAJES DEL SERVICE WORKER ---
     useEffect(() => {
         const handleMessage = (event) => {
-            // Nota: event.data puede ser un objeto
+            // Verificar que sea un objeto con tipo 'NAVIGATE'
             if (event.data && event.data.type === 'NAVIGATE') {
                 const url = new URL(event.data.payload.url, window.location.origin);
                 const action = url.searchParams.get('action');
@@ -304,7 +310,7 @@ function AppContent() {
 
     return (
         <>
-            {/* --- ALERTA DE ACTUALIZACIÓN DE PWA (MEJORADA) --- */}
+            {/* --- ALERTA DE ACTUALIZACIÓN DE PWA (FINAL) --- */}
             <Snackbar 
                 open={showUpdatePrompt} 
                 anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
