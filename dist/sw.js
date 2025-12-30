@@ -1,7 +1,7 @@
 // public/sw.js
 // IMPORTANTE: CAMBIA ESTE NÚMERO (v6, v7, v8...) EN CADA ACTUALIZACIÓN IMPORTANTE
 // Esto "romperá" la caché vieja de los móviles y forzará la descarga del nuevo código.
-const CACHE_NAME = 'erick-go-cache-v6';
+const CACHE_NAME = 'erick-go-cache-v7';
 
 const urlsToCache = [
   '/',
