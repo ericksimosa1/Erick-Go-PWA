@@ -1,6 +1,6 @@
 // public/sw.js
-// IMPORTANTE: CAMBIAR A V8 EN PUBLIC
-const CACHE_NAME = 'erick-go-cache-v8';
+// IMPORTANTE: CAMBIAR A V+1 EN PUBLIC
+const CACHE_NAME = 'erick-go-cache-v9';
 
 const urlsToCache = [
   '/',

@@ -20,7 +20,8 @@ export default function EmployeeDashboard() {
         distributeClosingTimeToDrivers, 
         clearAllClosingTimesForToday,
         fetchDriversByZone,
-        hasDriverClosingRecordToday // <--- IMPORTANTE: Agregamos esta nueva función
+        hasDriverClosingRecordToday,
+        getTodayClosingPersonFromWeeklyConfig // <--- IMPORTANTE: Agregamos esta función para consultar la "Fuente de la Verdad"
     } = useFirestore();
     
     const [zones, setZones] = useState([]);
@@ -153,13 +154,24 @@ export default function EmployeeDashboard() {
                 if (targetClientId) {
                     console.log("Empresa a cargar:", targetClientId);
                     
-                    // Verificar si este usuario es el encargado de cerrar hoy (según configuración semanal)
-                    const currentVinculo = userVinculos.find(v => v.clientId === targetClientId);
+                    // ========================================================================
+                    // CORRECCIÓN CRÍTICA: Verificar encargado usando la Configuración Semanal
+                    // ========================================================================
                     
-                    if (currentVinculo && currentVinculo.esEncargadoCierre) {
+                    // 1. Consultar quién es el encargado HOY según la configuración semanal
+                    const todaysClosingPerson = await getTodayClosingPersonFromWeeklyConfig(targetClientId);
+                    
+                    console.log("Encargado según Config Semanal:", todaysClosingPerson);
+                    console.log("ID del usuario actual:", user.uid);
+
+                    // 2. Verificar si YO soy ese usuario
+                    const amIClosingPerson = todaysClosingPerson && todaysClosingPerson.userId === user.uid;
+                    
+                    if (amIClosingPerson) {
+                        console.log("✅ El usuario ES el encargado de cierre hoy.");
                         setIsClosingPerson(true);
                         
-                        // PASO 1: Verificar SI YA EXISTE una hora de cierre en la configuración diaria para hoy
+                        // PASO 2: Verificar SI YA EXISTE una hora de cierre en la configuración diaria para hoy
                         console.log("Usuario es encargado de cierre. Verificando si ya existe hora registrada en BD...");
                         const existingTime = await getTodayClosingTime(targetClientId);
 
@@ -175,9 +187,11 @@ export default function EmployeeDashboard() {
                             setMustRegisterClosingTime(true);
                         }
                     } else {
+                        console.log("❌ El usuario NO es el encargado de cierre hoy.");
                         setIsClosingPerson(false);
                         setMustRegisterClosingTime(false);
                     }
+                    // ========================================================================
                 }
 
             } catch (error) {
@@ -189,7 +203,7 @@ export default function EmployeeDashboard() {
         };
 
         initializeDashboard();
-    }, [user, navigate, fetchUserVinculos, getTodayClosingTime, initialized]);
+    }, [user, navigate, fetchUserVinculos, getTodayClosingTime, initialized, getTodayClosingPersonFromWeeklyConfig]);
 
     // EFECTO 2: Carga de datos específicos de la empresa
     useEffect(() => {
