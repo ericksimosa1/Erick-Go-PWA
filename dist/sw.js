@@ -1,6 +1,6 @@
 // public/sw.js
 // IMPORTANTE: CAMBIAR A V+1 EN PUBLIC
-const CACHE_NAME = 'erick-go-cache-v9';
+const CACHE_NAME = 'erick-go-cache-v10';
 
 const urlsToCache = [
   '/',
@@ -9,7 +9,7 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  console.log('[SW] Instalando Service Worker v8...');
+  console.log('[SW] Instalando Service Worker v10...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -27,7 +27,7 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  console.log('[SW] Activando Service Worker v8...');
+  console.log('[SW] Activando Service Worker v10...');
   
   event.waitUntil(
     // Borra TODAS las cachés antiguas (v7, v6, v5...)

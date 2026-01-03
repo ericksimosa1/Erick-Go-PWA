@@ -19,6 +19,7 @@ import ShareIcon from '@mui/icons-material/Share';
 import { useAuthStore } from '../store/authStore';
 import { useFirestore } from '../hooks/useFirestore';
 import ShareAppModal from './ShareAppModal';
+import PwaInstallPrompt from './PwaInstallPrompt'; // Importamos el componente de instalación
 
 const MainLayout = ({ children }) => {
     const { user, logout, selectedClientId, setSelectedClient, clients, setClients } = useAuthStore();
@@ -177,7 +178,7 @@ const MainLayout = ({ children }) => {
                 size={isSmallMobile ? "small" : "medium"}
                 sx={{ 
                     minWidth: isSmallMobile ? 'auto' : undefined,
-                    px: isSmallMobile ? 1 : undefined
+                    px: isSmallMobile ?1 : undefined
                 }}
             >
                 {isSmallMobile ? 'Salir' : 'Cerrar Sesión'}
@@ -193,6 +194,9 @@ const MainLayout = ({ children }) => {
                 </AppBar>
                 
                 <Box sx={{ flexGrow: 1, p: 3, overflow: 'auto', height: 0 }}>
+                    {/* COMPONENTE AGREGADO: Para pedir instalación de la app */}
+                    <PwaInstallPrompt />
+                    
                     {children}
                 </Box>
             </Box>

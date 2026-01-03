@@ -38,7 +38,7 @@ export const useFirestore = () => {
             const querySnapshot = await getDocs(q);
             
             if (querySnapshot.empty) {
-                console.log("No se encontraron administradores globales");
+                console.log(">>> [DEBUG] No se encontraron administradores globales");
                 return [];
             }
             
@@ -47,17 +47,17 @@ export const useFirestore = () => {
                 ...doc.data()
             }));
             
-            console.log(`Se encontraron ${administrators.length} administradores globales`);
+            console.log(`>>> [DEBUG] Se encontraron ${administrators.length} administradores globales`);
             return administrators;
         } catch (error) {
-            console.error("Error al obtener administradores globales:", error);
+            console.error(">>> [ERROR] Error al obtener administradores globales:", error);
             return [];
         }
     }, []);
 
     const fetchUsersByClient = useCallback(async (clientId) => {
         if (!clientId) return [];
-        console.log(`[fetchUsersByClient] Iniciando carga para clientId: ${clientId}`);
+        console.log(`>>> [DEBUG fetchUsersByClient] Iniciando carga para clientId: ${clientId}`);
 
         try {
             const vinculosCollection = collection(db, 'vinculos');
@@ -65,7 +65,7 @@ export const useFirestore = () => {
             const vinculosSnapshot = await getDocs(qVinculos);
 
             if (vinculosSnapshot.empty) {
-                console.log(`[fetchUsersByClient] No se encontraron vínculos para clientId: ${clientId}`);
+                console.log(`>>> [DEBUG fetchUsersByClient] No se encontraron vínculos para clientId: ${clientId}`);
                 return [];
             }
 
@@ -104,7 +104,7 @@ export const useFirestore = () => {
                         gruposZonas: vinculoData.gruposZonas || [],
                         esEncargadoCierre: vinculoData.esEncargadoCierre || false,
                     };
-                    console.log(`[fetchUsersByClient] Usuario ${userData.nombre} (Vinculo: ${vinculoData.id}) tiene GRUPOS:`, userObject.gruposZonas);
+                    console.log(`>>> [DEBUG fetchUsersByClient] Usuario ${userData.nombre} (Vinculo: ${vinculoData.id}) tiene GRUPOS:`, userObject.gruposZonas);
                     return userObject;
                 }
                 return null;
@@ -113,7 +113,7 @@ export const useFirestore = () => {
             return usersList;
 
         } catch (error) {
-            console.error("Error en fetchUsersByClient:", error);
+            console.error(">>> [ERROR] Error en fetchUsersByClient:", error);
             return [];
         }
     }, []);
@@ -137,7 +137,7 @@ export const useFirestore = () => {
 
     const createVinculo = useCallback(async (userId, clientId, rol) => {
         if (!rol) {
-            console.error("Error: Se intentó crear un vínculo sin especificar un rol.");
+            console.error(">>> [ERROR] Se intentó crear un vínculo sin especificar un rol.");
             throw new Error("El rol es obligatorio para crear un vínculo.");
         }
 
@@ -316,14 +316,14 @@ export const useFirestore = () => {
     
     // Función auxiliar para obtener todos los vínculos y depurar
     const debugAllVinculos = useCallback(async () => {
-        console.log("[DEBUG] Obteniendo todos los vínculos para depuración...");
+        console.log(">>> [DEBUG] Obteniendo todos los vínculos para depuración...");
         const vinculosCollection = collection(db, 'vinculos');
         const allVinculosSnapshot = await getDocs(vinculosCollection);
         
-        console.log("[DEBUG] Analizando los primeros 5 vínculos en detalle:");
+        console.log(">>> [DEBUG] Analizando los primeros 5 vínculos en detalle:");
         allVinculosSnapshot.docs.slice(0,5).forEach((doc, index) => {
             const data = doc.data();
-            console.log(`[DEBUG] Vínculo ${index + 1}:`, {
+            console.log(`>>> [DEBUG] Vínculo ${index + 1}:`, {
                 id: doc.id,
                 userId: data.userId,
                 clientId: data.clientId,
@@ -340,7 +340,7 @@ export const useFirestore = () => {
             rolesCount[rol] = (rolesCount[rol] || 0) + 1;
         });
         
-        console.log("[DEBUG] Conteo de roles en todos los vínculos:", rolesCount);
+        console.log(">>> [DEBUG] Conteo de roles en todos los vínculos:", rolesCount);
         return allVinculosSnapshot;
     }, []);
     
@@ -350,7 +350,7 @@ export const useFirestore = () => {
             throw new Error("Rol inválido. Debe ser 'empleado', 'conductor' o 'cliente'.");
         }
 
-        console.log(`Iniciando eliminación masiva de usuarios con rol: ${role}`);
+        console.log(`>>> [INFO] Iniciando eliminación masiva de usuarios con rol: ${role}`);
         
         if (role === 'cliente') {
             const clientsCollection = collection(db, 'clientes');
@@ -360,7 +360,7 @@ export const useFirestore = () => {
                 batch.delete(doc.ref);
             });
             await batch.commit();
-            console.log(`Se eliminaron ${clientsSnapshot.size} clientes`);
+            console.log(`>>> [INFO] Se eliminaron ${clientsSnapshot.size} clientes`);
             return { deletedCount: clientsSnapshot.size };
         }
         
@@ -368,7 +368,7 @@ export const useFirestore = () => {
         const allVinculosSnapshot = await debugAllVinculos();
         
         if (allVinculosSnapshot.empty) {
-            console.log(`No se encontraron vínculos en la base de datos`);
+            console.log(">>> [INFO] No se encontraron vínculos en la base de datos");
             return { deletedCount: 0 };
         }
         
@@ -392,7 +392,7 @@ export const useFirestore = () => {
         });
         
         if (filteredVinculos.length === 0) {
-            console.log(`No se encontraron usuarios con rol: ${role}`);
+            console.log(`>>> [INFO] No se encontraron usuarios con rol: ${role}`);
             return { deletedCount: 0 };
         }
         
@@ -408,14 +408,14 @@ export const useFirestore = () => {
             });
         });
         
-        console.log(`Se eliminarán ${userIdsToDelete.length} documentos de usuarios que solo tienen rol: ${role}`);
+        console.log(`>>> [INFO] Se eliminarán ${userIdsToDelete.length} documentos de usuarios que solo tienen rol: ${role}`);
         
         const batch = writeBatch(db);
         filteredVinculos.forEach(doc => {
             batch.delete(doc.ref);
         });
         await batch.commit();
-        console.log(`Se eliminaron ${filteredVinculos.length} vínculos de usuarios con rol: ${role}`);
+        console.log(`>>> [INFO] Se eliminaron ${filteredVinculos.length} vínculos de usuarios con rol: ${role}`);
         
         if (userIdsToDelete.length > 0) {
             const usersBatch = writeBatch(db);
@@ -424,7 +424,7 @@ export const useFirestore = () => {
                 usersBatch.delete(userRef);
             });
             await usersBatch.commit();
-            console.log(`Se eliminaron ${userIdsToDelete.length} documentos de usuarios con rol: ${role}`);
+            console.log(`>>> [INFO] Se eliminaron ${userIdsToDelete.length} documentos de usuarios con rol: ${role}`);
         }
         
         return { deletedCount: filteredVinculos.length };
@@ -432,14 +432,14 @@ export const useFirestore = () => {
 
     // Crear datos de prueba
     const createTestData = useCallback(async () => {
-        console.log("Iniciando creación de datos de prueba");
+        console.log(">>> [INFO] Iniciando creación de datos de prueba");
         
         try {
             const client1Data = { nombre: "Empresa Prueba Alpha", direccion: "Dirección Alpha 123", telefono: "+58 212-1234567" };
             const client2Data = { nombre: "Empresa Prueba Beta", direccion: "Dirección Beta 456", telefono: "+58 212-7654321" };
             const client1Ref = await addDoc(collection(db, 'clientes'), client1Data);
             const client2Ref = await addDoc(collection(db, 'clientes'), client2Data);
-            console.log(`Creados clientes: ${client1Ref.id} y ${client2Ref.id}`);
+            console.log(`>>> [INFO] Creados clientes: ${client1Ref.id} y ${client2Ref.id}`);
             
             const zones1 = []; const zones2 = [];
             for (let i = 1; i <= 5; i++) {
@@ -447,7 +447,7 @@ export const useFirestore = () => {
                 const zone2Ref = await addDoc(collection(db, 'zonas'), { nombre: `Zona Beta ${i}`, clientId: client2Ref.id });
                 zones1.push(zone1Ref.id); zones2.push(zone2Ref.id);
             }
-            console.log(`Creadas zonas para los clientes`);
+            console.log(">>> [INFO] Creadas zonas para los clientes");
             
             for (let i = 1; i <= 10; i++) {
                 const userData1 = { nombre: `Empleado Alpha ${i}`, correo: `empleado.alpha${i}@prueba.com`, telefono: `+58 414-100${i.toString().padStart(4, '0')}`, rol: 'empleado' };
@@ -467,11 +467,11 @@ export const useFirestore = () => {
                 await addDoc(collection(db, 'vinculos'), { userId: userRef2.id, clientId: client2Ref.id, rol: 'empleado', activo: true, zonasAsignadas: randomZones2, fechaCreacion: Timestamp.now() });
             }
             
-            console.log("Datos de prueba creados exitosamente");
+            console.log(">>> [SUCCESS] Datos de prueba creados exitosamente");
             return { success: true };
             
         } catch (error) {
-            console.error("Error al crear datos de prueba:", error);
+            console.error(">>> [ERROR] Error al crear datos de prueba:", error);
             throw error;
         }
     }, []);
@@ -524,13 +524,12 @@ export const useFirestore = () => {
             }
             return null;
         } catch (error) {
-            console.error("Error al obtener la hora de cierre del conductor:", error);
+            console.error(">>> [ERROR] Error al obtener la hora de cierre del conductor:", error);
             return null;
         }
     }, []);
 
     // Establecer la hora de cierre para un conductor específico
-    // CORREGIDO: Se simplifica la consulta para evitar error de índice compuesto
     const setClosingTimeForDriver = useCallback(async (clientId, driverId, time, registeredBy, registeredByName) => {
         try {
             const today = new Date();
@@ -571,13 +570,12 @@ export const useFirestore = () => {
             
             return true;
         } catch (error) {
-            console.error("Error al establecer la hora de cierre del conductor:", error);
+            console.error(">>> [ERROR] Error al establecer la hora de cierre del conductor:", error);
             return false;
         }
     }, []);
 
     // CORRECCIÓN: Función para limpiar la hora de cierre de un conductor específico
-    // CORREGIDO: Se simplifica la consulta para evitar error de índice compuesto
     const clearTodayClosingTimeForDriver = useCallback(async (clientId, driverId) => {
         try {
             const today = new Date();
@@ -602,13 +600,13 @@ export const useFirestore = () => {
             
             if (driverRecord) {
                 await deleteDoc(driverRecord.ref);
-                console.log(`Hora de cierre del conductor ${driverId} para hoy ha sido eliminada.`);
+                console.log(`>>> [INFO] Hora de cierre del conductor ${driverId} para hoy ha sido eliminada.`);
                 return true;
             }
             
             return false;
         } catch (error) {
-            console.error("Error al limpiar la hora de cierre del conductor:", error);
+            console.error(">>> [ERROR] Error al limpiar la hora de cierre del conductor:", error);
             return false;
         }
     }, []);
@@ -633,7 +631,7 @@ export const useFirestore = () => {
             const querySnapshot = await getDocs(q);
             
             if (querySnapshot.empty) {
-                console.log("No se encontraron registros de cierre para hoy");
+                console.log(">>> [INFO] No se encontraron registros de cierre para hoy");
                 return false;
             }
             
@@ -644,11 +642,11 @@ export const useFirestore = () => {
             });
             
             await batch.commit();
-            console.log(`Se han eliminado ${querySnapshot.size} registros de cierre para hoy`);
+            console.log(`>>> [INFO] Se han eliminado ${querySnapshot.size} registros de cierre para hoy`);
             
             return true;
         } catch (error) {
-            console.error("Error al limpiar todas las horas de cierre del día:", error);
+            console.error(">>> [ERROR] Error al limpiar todas las horas de cierre del día:", error);
             return false;
         }
     }, []);
@@ -682,7 +680,7 @@ export const useFirestore = () => {
             
             return true;
         } catch (error) {
-            console.error("Error al marcar la jornada como finalizada:", error);
+            console.error(">>> [ERROR] Error al marcar la jornada como finalizada:", error);
             return false;
         }
     }, []);
@@ -726,7 +724,7 @@ export const useFirestore = () => {
             const docId = querySnapshot.docs[0].id;
             const docRef = doc(db, 'cierres', docId);
             await deleteDoc(docRef);
-            console.log(`Hora de cierre para hoy (clientId: ${clientId}) ha sido eliminada.`);
+            console.log(`>>> [INFO] Hora de cierre para hoy (clientId: ${clientId}) ha sido eliminada.`);
         }
     }, []);
 
@@ -800,7 +798,7 @@ export const useFirestore = () => {
             await setDoc(configRef, defaultConfig);
             return defaultConfig;
         } catch (error) {
-            console.error("Error al obtener configuración semanal de cierre:", error);
+            console.error(">>> [ERROR] Error al obtener configuración semanal de cierre:", error);
             return null;
         }
     }, []);
@@ -817,7 +815,7 @@ export const useFirestore = () => {
             await setDoc(configRef, updatedConfig);
             return true;
         } catch (error) {
-            console.error("Error al actualizar configuración semanal de cierre:", error);
+            console.error(">>> [ERROR] Error al actualizar configuración semanal de cierre:", error);
             return false;
         }
     }, []);
@@ -849,7 +847,7 @@ export const useFirestore = () => {
             
             return null;
         } catch (error) {
-            console.error("Error al obtener encargado de cierre del día:", error);
+            console.error(">>> [ERROR] Error al obtener encargado de cierre del día:", error);
             return null;
         }
     }, [fetchWeeklyClosingConfig]);
@@ -922,9 +920,9 @@ export const useFirestore = () => {
                 newClosingTime,
                 timestamp: Timestamp.now()
             });
-            console.log(`Notificación de cambio de hora de cierre creada para el conductor ${driverId}`);
+            console.log(`>>> [INFO] Notificación de cambio de hora de cierre creada para el conductor ${driverId}`);
         } catch (error) {
-            console.error('Error al notificar cambio de hora de cierre:', error);
+            console.error('>>> [ERROR] Error al notificar cambio de hora de cierre:', error);
         }
     }, []);
 
@@ -973,7 +971,7 @@ export const useFirestore = () => {
             );
             
             const querySnapshot = await getDocs(q);
-            console.log(`getTodayClosingTimes: Se encontraron ${querySnapshot.size} registros de cierre para la empresa ${clientId}`);
+            console.log(`>>> [DEBUG getTodayClosingTimes] Se encontraron ${querySnapshot.size} registros de cierre para la empresa ${clientId}`);
             
             // Buscar cierre específico del conductor y cierre de la empresa
             let driverClosingTime = null;
@@ -984,7 +982,7 @@ export const useFirestore = () => {
             const userData = userDoc.exists() ? userDoc.data() : null;
             const userRole = userData ? userData.rol : null;
             
-            console.log(`Información del usuario:`, {
+            console.log(`>>> [DEBUG] Información del usuario:`, {
                 userId: driverId,
                 userRole: userRole
             });
@@ -997,7 +995,7 @@ export const useFirestore = () => {
                 // PROTECCIÓN: Ignorar registros corruptos (userId que no es string)
                 // ====================================================================
                 if (!data.userId || typeof data.userId !== 'string') {
-                    console.warn(`[LIMPIEZA] Saltando registro de cierre corrupto (ID: ${queryDocSnapshot.id}). userId no es string.`);
+                    console.warn(`>>> [WARN LIMPIEZA] Saltando registro de cierre corrupto (ID: ${queryDocSnapshot.id}). userId no es string.`);
                     continue; // <--- CLAVE: Saltar este registro corrupto y pasar al siguiente
                 }
                 // ================================================================================
@@ -1005,7 +1003,7 @@ export const useFirestore = () => {
                 // Si el registro coincide con el ID del conductor
                 if (data.userId === driverId) {
                     driverClosingTime = data.horaCierre;
-                    console.log(`Hora de cierre del conductor encontrada: ${data.horaCierre}`);
+                    console.log(`>>> [INFO] Hora de cierre del conductor encontrada: ${data.horaCierre}`);
                 }
                 
                 // CORRECCIÓN: Considerar como cierre de empresa cualquier registro que:
@@ -1014,7 +1012,7 @@ export const useFirestore = () => {
                 // 3. Pertenezca a un usuario con rol 'empleado' (el encargado de cierre)
                 if (!data.userId || data.isCompanyWide === true) {
                     companyClosingTime = data.horaCierre;
-                    console.log(`Hora de cierre de la empresa encontrada (criterio 1 o 2): ${data.horaCierre}`);
+                    console.log(`>>> [INFO] Hora de cierre de la empresa encontrada (criterio 1 o 2): ${data.horaCierre}`);
                 } else if (data.userId && data.userId !== driverId) {
                     // Verificar si el userId pertenece a un empleado
                     try {
@@ -1023,11 +1021,11 @@ export const useFirestore = () => {
                             const closingUserData = closingUserDoc.data();
                             if (closingUserData.rol === 'empleado') {
                                 companyClosingTime = data.horaCierre;
-                                console.log(`Hora de cierre de la empresa encontrada (criterio 3 - empleado): ${data.horaCierre}`);
+                                console.log(`>>> [INFO] Hora de cierre de la empresa encontrada (criterio 3 - empleado): ${data.horaCierre}`);
                             }
                         }
                     } catch (error) {
-                        console.error("Error al verificar el rol del usuario de cierre:", error);
+                        console.error(">>> [ERROR] Error al verificar el rol del usuario de cierre:", error);
                     }
                 }
             }
@@ -1039,7 +1037,7 @@ export const useFirestore = () => {
                 hasAnyClosingTime: !!(driverClosingTime || companyClosingTime)
             };
         } catch (error) {
-            console.error('Error al obtener horas de cierre:', error);
+            console.error('>>> [ERROR] Error al obtener horas de cierre:', error);
             return {
                 driverClosingTime: null,
                 companyClosingTime: null,
@@ -1051,7 +1049,6 @@ export const useFirestore = () => {
     // ====================================================================
     // NUEVA FUNCIÓN: hasDriverClosingRecordToday
     // Verifica si un conductor ya tiene un registro de cierre hoy (memoria de notificación)
-    // CORREGIDO: Simplificación de consulta para evitar índice compuesto
     // ====================================================================
     const hasDriverClosingRecordToday = useCallback(async (clientId, driverId) => {
         try {
@@ -1089,96 +1086,90 @@ export const useFirestore = () => {
             return !!driverRecord;
             
         } catch (error) {
-            console.error("Error al verificar registro de cierre del conductor:", error);
+            console.error(">>> [ERROR] Error al verificar registro de cierre del conductor:", error);
             return false; // Si hay error, asumimos que no se ha notificado para no dejarlo sin info
         }
     }, []);
 
     // ====================================================================
     // CORRECCIÓN CRÍTICA: NUEVAS FUNCIONES PARA DISTRIBUIR HORA DE CIERRE A CONDUCTORES
+    // MEJORA: Ahora notifica a TODOS los conductores, independientemente de si tienen empleados pendientes.
+    // MEJORA: Convierte la hora a formato AM/PM en el mensaje.
     // ====================================================================
     
-    // Función para distribuir la hora de cierre a todos los conductores con empleados disponibles
-    // CORREGIDO: INCLUIR NOMBRE DE LA EMPRESA EN LA NOTIFICACIÓN
     const distributeClosingTimeToDrivers = useCallback(async (clientId, closingTime, currentUser) => {
         try {
-            // CORRECCIÓN: Verificar que currentUser existe y tiene uid
+            console.log('>>> [DEBUG distributeClosingTimeToDrivers] Iniciando proceso de distribución...');
+            
+            // Validación de usuario
             if (!currentUser || !currentUser.uid) {
-                console.error('Error: currentUser no está definido o no tiene uid');
+                console.error('>>> [ERROR] currentUser no está definido o no tiene uid');
                 return false;
             }
 
-            // ====================================================================
-            // NUEVO: OBTENER EL NOMBRE DE LA EMPRESA
-            // ====================================================================
+            // 1. Obtener nombre de la empresa
             const allClients = await fetchClients();
             const currentClient = allClients.find(c => c.id === clientId);
             const companyName = currentClient ? currentClient.nombre : 'tu empresa';
-            console.log(`[distributeClosingTimeToDrivers] Empresa detectada: ${companyName} (ID: ${clientId})`);
+            console.log(`>>> [INFO] Empresa detectada: ${companyName} (ID: ${clientId})`);
             // ====================================================================
 
-            // Obtener todos los usuarios de la empresa
+            // 2. Obtener todos los usuarios de la empresa
             const users = await fetchUsersByClient(clientId);
             
-            // Filtrar solo los conductores
+            // 3. Filtrar solo los conductores
             const drivers = users.filter(user => user.userData.rol === 'conductor');
+            console.log(`>>> [INFO] Total conductores encontrados en esta empresa: ${drivers.length}`);
             
-            // Para cada conductor, verificar si tiene empleados disponibles hoy
-            const todayAsistencias = await fetchTodayAsistencias(clientId);
-            
-            const driversToNotify = []; // Guardamos los conductores que efectivamente recibieron la hora
+            // 4. Preparar lista de notificados
+            const driversToNotify = []; 
 
+            // 5. Iterar sobre TODOS los conductores
+            // CAMBIO IMPORTANTE: Ya NO consultamos asistencias aquí. Asignamos hora a todos.
             for (const driver of drivers) {
                 // CORRECCIÓN: Verificar que driver tiene userId
                 if (!driver.userId) {
-                    console.warn('Conductor sin userId encontrado, saltando...');
+                    console.warn('>>> [WARN] Conductor sin userId encontrado, saltando...');
                     continue;
                 }
 
-                // Verificar si el conductor tiene zonas asignadas
-                if (!driver.zonasAsignadas || driver.zonasAsignadas.length === 0) {
-                    continue;
-                }
+                // Guardamos la hora de cierre para que aparezca en su Dashboard
+                // tengan empleados o no.
+                await setClosingTimeForDriver(
+                    clientId, 
+                    driver.userId, 
+                    closingTime, 
+                    currentUser.uid, 
+                    currentUser.nombre || 'Usuario desconocido'
+                );
                 
-                // Filtrar empleados que están en las zonas del conductor
-                const availableEmployees = todayAsistencias.filter(asistencia => {
-                    return driver.zonasAsignadas.includes(asistencia.zona) && 
-                           !asistencia.completado;
-                });
+                console.log(`>>> [SUCCESS] Hora de cierre ${closingTime} asignada/actualizada para el conductor ${driver.userData.nombre}`);
                 
-                // Si el conductor tiene empleados disponibles, asignarle la hora de cierre
-                if (availableEmployees.length > 0) {
-                    await setClosingTimeForDriver(
-                        clientId, 
-                        driver.userId, 
-                        closingTime, 
-                        currentUser.uid, 
-                        currentUser.nombre || 'Usuario desconocido'
-                    );
-                    console.log(`Hora de cierre ${closingTime} asignada al conductor ${driver.userData.nombre}`);
-                    driversToNotify.push(driver.userId); // Agregamos a la lista de notificados
-                }
+                // Agregamos a TODOS los conductores a la lista de notificados
+                driversToNotify.push(driver.userId); 
             }
 
-            // --- NUEVO: ENVIAR NOTIFICACIÓN PUSH A LOS CONDUCTORES AFECTADOS ---
+            // 6. Envío de notificaciones
             if (driversToNotify.length > 0) {
                 
                 // 🔒 PROTECCIÓN MODO DESARROLLO
                 if (import.meta.env.DEV) {
-                    console.log(`[MODO DESARROLLO] Se omitió el envío de notificaciones a ${driversToNotify.length} conductores para evitar errores de conexión.`);
+                    console.log(`>>> [DEV MODE] Se omitió el envío de notificaciones a ${driversToNotify.length} conductores.`);
+                    console.log(`>>> [DEV MODE] Se habría enviado: "El encargado ${currentUser.nombre} ha establecido la hora..."`);
                     return true; 
                 }
 
-                console.log(`Enviando notificaciones de cambio de hora a ${driversToNotify.length} conductores...`);
-                console.log("Lista de IDs a notificar:", driversToNotify);
+                console.log(`>>> [INFO] Preparando envío de notificaciones a ${driversToNotify.length} conductores...`);
+                console.log(">>> [INFO] Lista de IDs a notificar:", driversToNotify);
                 
                 // ====================================================================
-                // NUEVO CUERPO DE NOTIFICACIÓN CON NOMBRE DE EMPRESA
+                // NUEVO CUERPO DE NOTIFICACIÓN CON NOMBRE DE EMPRESA Y HORA FORMATEADA
                 // ====================================================================
+                const formattedTime = convertTo12HourFormat(closingTime);
                 const notificationPayload = {
                     title: 'Hora de Cierre Actualizada',
                     // Ahora el mensaje es claro: "establecido para Croii Soledad..."
-                    body: `El encargado ${currentUser.nombre} ha establecido la hora de cierre para ${companyName} a las ${closingTime}.`,
+                    body: `El encargado ${currentUser.nombre} ha establecido la hora de cierre para ${companyName} a las ${formattedTime}.`,
                     icon: '/erick-go-logo.png',
                     data: { url: '/conductor-dashboard' }
                 };
@@ -1197,25 +1188,25 @@ export const useFirestore = () => {
 
                     if (!response.ok) {
                         const errorText = await response.text();
-                        console.error("ERROR DEL SERVIDOR (TEXTO):", errorText);
+                        console.error(">>> [ERROR DEL SERVIDOR (TEXTO)]:", errorText);
                         throw new Error(errorText || 'Error al enviar notificación.');
                     }
 
                     const result = await response.json();
-                    console.log('Notificaciones de cambio de hora enviadas con éxito:', result);
+                    console.log('>>> [SUCCESS] Notificaciones de cambio de hora enviadas con éxito:', result);
                 } catch (error) {
-                    console.error('Error al enviar notificaciones de cambio de hora:', error);
+                    console.error('>>> [ERROR] Error al enviar notificaciones de cambio de hora:', error);
                 }
             } else {
-                console.log("No hay conductores con empleados activos para notificar.");
+                console.log(">>> [INFO] No hay conductores registrados en esta empresa para notificar.");
             }
             
             return true;
         } catch (error) {
-            console.error('Error al distribuir la hora de cierre a los conductores:', error);
+            console.error('>>> [ERROR] Error al distribuir la hora de cierre a los conductores:', error);
             return false;
         }
-    }, [fetchUsersByClient, fetchTodayAsistencias, fetchClients, setClosingTimeForDriver]);
+    }, [fetchUsersByClient, fetchClients, setClosingTimeForDriver, convertTo12HourFormat]);
 
     // ====================================================================
     // CORRECCIÓN: NUEVA FUNCIÓN PARA VERIFICAR CONDUCTORES CON EMPLEADOS PENDIENTES
@@ -1261,14 +1252,14 @@ export const useFirestore = () => {
                 }
             }
             
-            console.log(`Conductores con empleados pendientes: ${driversWithPending.length}`);
+            console.log(`>>> [INFO] Conductores con empleados pendientes: ${driversWithPending.length}`);
             driversWithPending.forEach(driver => {
-                console.log(`- ${driver.driverName}: ${driver.pendingCount} empleados pendientes`);
+                console.log(`>>> - ${driver.driverName}: ${driver.pendingCount} empleados pendientes`);
             });
             
             return driversWithPending;
         } catch (error) {
-            console.error('Error al verificar conductores con empleados pendientes:', error);
+            console.error('>>> [ERROR] Error al verificar conductores con empleados pendientes:', error);
             return [];
         }
     }, [fetchUsersByClient, fetchTodayAsistencias]);
@@ -1278,7 +1269,7 @@ export const useFirestore = () => {
     // ====================================================================
     const fetchDriversByZone = useCallback(async (clientId, zoneId) => {
         if (!clientId || !zoneId) return [];
-        console.log(`[fetchDriversByZone] Buscando conductores para clientId: ${clientId}, zoneId: ${zoneId}`);
+        console.log(`>>> [DEBUG fetchDriversByZone] Buscando conductores para clientId: ${clientId}, zoneId: ${zoneId}`);
 
         try {
             const vinculosCollection = collection(db, 'vinculos');
@@ -1291,7 +1282,7 @@ export const useFirestore = () => {
             const querySnapshot = await getDocs(q);
 
             if (querySnapshot.empty) {
-                console.log(`[fetchDriversByZone] No se encontraron conductores activos para la empresa ${clientId}`);
+                console.log(`>>> [DEBUG fetchDriversByZone] No se encontraron conductores activos para la empresa ${clientId}`);
                 return [];
             }
 
@@ -1300,11 +1291,11 @@ export const useFirestore = () => {
                 .filter(vinculo => vinculo.zonasAsignadas && vinculo.zonasAsignadas.includes(zoneId))
                 .map(vinculo => vinculo.userId);
 
-            console.log(`[fetchDriversByZone] Se encontraron ${driverIds.length} conductores para la zona ${zoneId}:`, driverIds);
+            console.log(`>>> [DEBUG fetchDriversByZone] Se encontraron ${driverIds.length} conductores para la zona ${zoneId}:`, driverIds);
             return driverIds;
 
         } catch (error) {
-            console.error("Error en fetchDriversByZone:", error);
+            console.error(">>> [ERROR] Error en fetchDriversByZone:", error);
             return [];
         }
     }, []);

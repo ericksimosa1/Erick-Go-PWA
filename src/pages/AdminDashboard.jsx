@@ -10,6 +10,8 @@ import {
 } from '@mui/icons-material';
 import { useFirestore } from '../hooks/useFirestore';
 import { useAuthStore } from '../store/authStore';
+import { db } from '../firebase'; // <--- IMPORTANTE: Falta esta importación causaba el error
+import { collection, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
 import RegisterUserModal from '../components/RegisterUserModal';
 import NotificationSettings from '../components/NotificationSettings';
 
@@ -54,7 +56,7 @@ export default function AdminDashboard() {
     const [users, setUsers] = useState([]);
     const [editUserDialog, setEditUserDialog] = useState({ open: false, user: null, vinculoId: null });
     const [registerModalOpen, setRegisterModalOpen] = useState(false);
-    const [zones, setZones] = useState([]); // <-- LÍNEA CLAVE 1: Declaración de 'zones' y 'setZones'
+    const [zones, setZones] = useState([]); 
     const [isLoading, setIsLoading] = useState(false);
     const [todayAsistencias, setTodayAsistencias] = useState([]);
 
@@ -137,6 +139,44 @@ export default function AdminDashboard() {
         loadGlobalConfig();
     }, [isAppReady, fetchGlobalConfig]);
 
+    // --- NUEVO: EFECTO PARA ESCUCHAR CAMBIOS EN TIEMPO REAL ---
+    useEffect(() => {
+        if (!selectedClientId) return;
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+
+        const q = query(
+            collection(db, 'cierres'),
+            where('clientId', '==', selectedClientId),
+            where('fecha', '>=', Timestamp.fromDate(today)),
+            where('fecha', '<', Timestamp.fromDate(tomorrow))
+        );
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            console.log('[AdminDashboard] >>> Cambio detectado en cierres. Docs:', snapshot.docs.length);
+            
+            if (!snapshot.empty) {
+                // Tomamos el último documento modificado o el primero relevante
+                const latestDoc = snapshot.docs[0]; 
+                const time = latestDoc.data().horaCierre;
+                
+                console.log(`[AdminDashboard] >>> Actualizando hora de cierre local a: ${time}`);
+                setClosingTime(time);
+            } else {
+                setClosingTime(null);
+                console.log('[AdminDashboard] >>> No se encontraron registros de cierre para hoy.');
+            }
+        });
+
+        return () => {
+            unsubscribe();
+        };
+    }, [selectedClientId]);
+    // -------------------------------------------------------------------
+
     useEffect(() => {
         if (!isAppReady) return;
         const fetchData = async () => {
@@ -144,21 +184,21 @@ export default function AdminDashboard() {
             try {
                 if (selectedClientId) {
                     const usersData = await fetchUsersByClient(selectedClientId);
-                    const zonesData = await fetchZones(selectedClientId); // <-- LÍNEA CLAVE 2: Uso de 'fetchZones'
+                    const zonesData = await fetchZones(selectedClientId); 
                     const closingPerson = await getTodayClosingPersonFromWeeklyConfig(selectedClientId);
                     const todayClosingTime = await getTodayClosingTime(selectedClientId);
                     const asistenciaData = await fetchTodayAsistencias(selectedClientId);
                     const weeklyConfig = await fetchWeeklyClosingConfig(selectedClientId);
 
                     setUsers(sortUsersByRole(usersData));
-                    setZones(zonesData); // <-- LÍNEA CLAVE 3: Uso de 'setZones'
+                    setZones(zonesData); 
                     setTodayClosingPerson(closingPerson);
                     setClosingTime(todayClosingTime);
                     setTodayAsistencias(asistenciaData);
                     setWeeklyClosingConfig(weeklyConfig);
                 } else {
                     setUsers([]);
-                    setZones([]); // <-- LÍNEA CLAVE 4: Uso de 'setZonas'
+                    setZones([]); 
                     setTodayClosingPerson(null);
                     setClosingTime(null);
                     setTodayAsistencias([]);
