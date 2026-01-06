@@ -1,22 +1,34 @@
-// netlify/functions/opt-out-reminder.js
-
+// netlify/functions/opt-out-reminder.cjs
 const admin = require('firebase-admin');
 
-// Inicializar Firebase Admin si no está inicializado
+// ====================================================================
+// INICIALIZACIÓN (CLAVE DIVIDIDA)
+// ====================================================================
+const getFullServiceAccount = () => {
+    const part1 = process.env.FIREBASE_KEY_PART_1 || '';
+    const part2 = process.env.FIREBASE_KEY_PART_2 || '';
+    const part3 = process.env.FIREBASE_KEY_PART_3 || '';
+
+    if (part1 && part2 && part3) {
+        return `${part1}${part2}${part3}`;
+    }
+    return process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+};
+
 if (!admin.apps.length) {
-  try {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        project_id: process.env.FIREBASE_PROJECT_ID,
-        client_email: process.env.FIREBASE_CLIENT_EMAIL,
-        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-      }),
-      databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
-    });
-    console.log('Firebase Admin inicializado correctamente');
-  } catch (error) {
-    console.error('Error al inicializar Firebase Admin:', error);
-  }
+    try {
+        const serviceAccountKey = getFullServiceAccount();
+        const serviceAccount = JSON.parse(serviceAccountKey);
+        
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
+        });
+        console.log('>>> [SUCCESS] Firebase Admin inicializado (Clave Unificada).');
+    } catch (error) {
+        console.error('>>> [ERROR] Error al inicializar Firebase Admin:', error);
+        throw new Error("Configuración faltante");
+    }
 }
 
 exports.handler = async function (event, context) {

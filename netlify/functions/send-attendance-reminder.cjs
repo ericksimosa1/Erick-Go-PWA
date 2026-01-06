@@ -1,402 +1,267 @@
-// netlify/functions/send-attendance-reminder.js (VERSIÓN MEJORADA CON NOMBRES)
-
+// netlify/functions/send-attendance-reminder.cjs (VERSIÓN MEJORADA CON NOMBRES)
 const webPush = require('web-push');
 const admin = require('firebase-admin');
 
-// Verificar configuración de VAPID
-if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
-  console.error('[DEBUG] Las claves VAPID no están configuradas en las variables de entorno');
-}
+// ====================================================================
+// INICIALIZACIÓN (CLAVE DIVIDIDA)
+// ====================================================================
+const getFullServiceAccount = () => {
+    const part1 = process.env.FIREBASE_KEY_PART_1 || '';
+    const part2 = process.env.FIREBASE_KEY_PART_2 || '';
+    const part3 = process.env.FIREBASE_KEY_PART_3 || '';
 
-// Verificar configuración de Firebase
-if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
-  console.error('[DEBUG] Las credenciales de Firebase no están configuradas en las variables de entorno');
+    if (part1 && part2 && part3) {
+        return `${part1}${part2}${part3}`;
+    }
+    return process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+};
+
+if (!admin.apps.length) {
+    try {
+        const serviceAccountKey = getFullServiceAccount();
+        const serviceAccount = JSON.parse(serviceAccountKey);
+        
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
+        });
+        console.log('>>> [SUCCESS] Firebase Admin inicializado (Clave Unificada).');
+    } catch (error) {
+        console.error('>>> [ERROR] Error al inicializar Firebase Admin:', error);
+        throw new Error("Configuración faltante");
+    }
 }
 
 // Configurar claves VAPID
-webPush.setVapidDetails(
-  'mailto:erickgoapp@gmail.com',
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
 
-// Inicializar Firebase Admin si no está inicializado
-if (!admin.apps.length) {
-  try {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        project_id: process.env.FIREBASE_PROJECT_ID,
-        client_email: process.env.FIREBASE_CLIENT_EMAIL,
-        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-      }),
-      databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
+if (vapidPublicKey && vapidPrivateKey) {
+    webpush.setVapidDetails({
+        subject: 'mailto:erickgoapp@gmail.com',
+        publicKey: vapidPublicKey,
+        privateKey: vapidPrivateKey
     });
-    console.log('Firebase Admin inicializado correctamente');
-  } catch (error) {
-    console.error('Error al inicializar Firebase Admin:', error);
-  }
+} else {
+    console.warn(">>> [WARN] Claves VAPID no encontradas en variables de entorno. Las notificaciones pueden fallar.");
 }
 
 // --- FUNCIÓN MEJORADA: Ahora busca en el lugar correcto y maneja el nuevo formato de hora ---
 async function getNotificationConfig(clientId) {
-  console.log(`[DEBUG] getNotificationConfig llamado para clientId: ${clientId}`);
-  try {
-    const db = admin.firestore();
-    const notificacionesDoc = await db.collection('clientes').doc(clientId)
-      .collection('configuracion').doc('notificaciones')
-      .get();
-    
-    if (notificacionesDoc.exists) {
-      const config = notificacionesDoc.data();
-      console.log(`[DEBUG] Configuración encontrada para ${clientId}:`, config);
-      return config;
-    }
-    
-    console.log(`[DEBUG] No se encontró configuración para ${clientId}. Usando configuración por defecto.`);
-    return {
-      enableNotifications: true,
-      enableAttendanceReminder: true,
-      attendanceReminderFrequency: 30,
-      attendanceReminderStartTime: '09:00', // Formato 24h
-      attendanceReminderEndTime: '22:00',   // Formato 24h
-      enableClosingReminder: true,
-      closingReminderTime: '18:00', // Formato 24h
-      enableTripNotifications: true,
-      batchSize: 10,
-      retryAttempts: 3
-    };
-  } catch (error) {
-    console.error('[DEBUG] Error al obtener configuración de notificaciones:', error);
-    return null;
-  }
-}
-
-// --- FUNCIÓN MEJORADA: Ahora respeta la opción "No Usar Transporte Hoy" ---
-async function getEmployeesNeedingReminder(clientId) {
-  console.log(`[DEBUG] getEmployeesNeedingReminder llamado para clientId: ${clientId}`);
-  try {
-    const db = admin.firestore();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-    
-    console.log(`[DEBUG] Rango de fecha: ${today.toISOString()} a ${tomorrow.toISOString()}`);
-    
-    const vinculosSnapshot = await db.collection('vinculos')
-      .where('clientId', '==', clientId)
-      .where('rol', '==', 'empleado')
-      .where('activo', '==', true)
-      .get();
-    
-    console.log(`[DEBUG] Vínculos de empleados encontrados: ${vinculosSnapshot.size}`);
-    const employeeIds = vinculosSnapshot.docs.map(doc => doc.data().userId);
-    console.log(`[DEBUG] IDs de empleados encontrados:`, employeeIds);
-    
-    if (employeeIds.length === 0) {
-      console.log('[DEBUG] No hay empleados vinculados para este cliente.');
-      return [];
-    }
-    
-    const asistenciasSnapshot = await db.collection('asistencias')
-      .where('clientId', '==', clientId)
-      .where('fecha', '>=', admin.firestore.Timestamp.fromDate(today))
-      .where('fecha', '<', admin.firestore.Timestamp.fromDate(tomorrow))
-      .get();
-    
-    console.log(`[DEBUG] Asistencias de hoy encontradas: ${asistenciasSnapshot.size}`);
-    const employeeIdsWithAttendance = new Set();
-    asistenciasSnapshot.docs.forEach(doc => {
-      employeeIdsWithAttendance.add(doc.data().empleadoId);
-    });
-    console.log(`[DEBUG] IDs de empleados con asistencia registrada:`, Array.from(employeeIdsWithAttendance));
-    
-    const optedOutUserIds = new Set();
-    console.log('[DEBUG] Buscando usuarios que han optado por no usar transporte hoy...');
-
-    const suscripcionesSnapshot = await db.collection('suscripciones')
-      .where('clientId', '==', clientId)
-      .where('dailyOptOut', '==', true)
-      .get();
-
-    suscripcionesSnapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.dailyOptOutDate && data.dailyOptOutDate.toDate().toDateString() === today.toDateString()) {
-        optedOutUserIds.add(data.userId);
-      }
-    });
-
-    console.log(`[DEBUG] Usuarios que han optado por salir hoy:`, Array.from(optedOutUserIds));
-    
-    const employeesNeedingReminder = employeeIds.filter(id => 
-      !employeeIdsWithAttendance.has(id) && !optedOutUserIds.has(id)
-    );
-    
-    console.log(`[DEBUG] RESULTADO FINAL: Empleados que necesitan recordatorio:`, employeesNeedingReminder);
-    return employeesNeedingReminder;
-  } catch (error) {
-    console.error('[DEBUG] Error al obtener empleados que necesitan recordatorio:', error);
-    return [];
-  }
-}
-
-// --- FUNCIÓN MEJORADA: Ahora incluye nombres de usuario y empresa en los logs ---
-async function sendNotificationsToUsers(userIds, payload, clientId, clientName) {
-  console.log(`[DEBUG] sendNotificationsToUsers llamado para ${userIds.length} usuarios de la empresa "${clientName}" (${clientId}).`);
-  try {
-    if (!userIds || userIds.length === 0) {
-      console.log(`[DEBUG] No hay usuarios a quienes notificar para la empresa "${clientName}".`);
-      return { success: true, message: 'No hay usuarios a quienes notificar' };
-    }
-    
-    const db = admin.firestore();
-    const results = [];
-    
-    // MEJORA: Obtener nombres de usuario en una sola consulta para mayor eficiencia
-    const usuariosSnapshot = await db.collection('usuarios').where(admin.firestore.FieldPath.documentId(), 'in', userIds).get();
-    const userNamesMap = new Map();
-    usuariosSnapshot.forEach(doc => {
-      userNamesMap.set(doc.id, doc.data().nombre || 'Nombre no encontrado');
-    });
-    console.log(`[DEBUG] Nombres de usuarios obtenidos: ${userNamesMap.size}`);
-    
-    // MEJORA: Verificar si hay suscripciones para los usuarios
-    const suscripcionesSnapshot = await db.collection('suscripciones')
-      .where('clientId', '==', clientId)
-      .where(admin.firestore.FieldPath.documentId(), 'in', userIds)
-      .get();
-    
-    console.log(`[DEBUG] Se encontraron ${suscripcionesSnapshot.size} suscripciones para los usuarios de "${clientName}"`);
-    
-    const suscripcionesMap = new Map();
-    suscripcionesSnapshot.forEach(doc => {
-      const data = doc.data();
-      suscripcionesMap.set(doc.id, data.subscription);
-    });
-    
-    for (const userId of userIds) {
-      const userName = userNamesMap.get(userId) || 'Usuario no encontrado';
-      console.log(`[DEBUG] Procesando notificación para el usuario: ${userName} (${userId}) de "${clientName}"`);
-      
-      const subscription = suscripcionesMap.get(userId);
-      
-      if (!subscription || !subscription.endpoint) {
-        console.log(`[DEBUG] ❌ Suscripción inválida para el usuario: ${userName} (${userId}) de "${clientName}"`);
-        results.push({ userId, userName, success: false, error: 'Suscripción inválida' });
-        continue;
-      }
-      
-      // CORRECCIÓN: Asegurarnos de incluir userId y clientId en los datos de la notificación
-      const personalizedPayload = {
-        ...payload,
-        data: {
-          ...payload.data,
-          userId: userId,
-          clientId: clientId
-        }
-      };
-
-      try {
-        await webPush.sendNotification(subscription, JSON.stringify(personalizedPayload));
-        console.log(`[DEBUG] ✅ Recordatorio interactivo enviado con éxito al usuario: ${userName} (${userId}) de "${clientName}"`);
-        results.push({ userId, userName, success: true });
-      } catch (error) {
-        console.error(`[DEBUG] ❌ Error al enviar recordatorio interactivo al usuario ${userName} (${userId}) de "${clientName}":`, error.message);
+    console.log(`[DEBUG] getNotificationConfig llamado para clientId: ${clientId}`);
+    try {
+        const db = admin.firestore();
+        const notificacionesDoc = await db.collection('clientes').doc(clientId)
+            .collection('configuracion').doc('notificaciones')
+            .get();
         
-        if (error.statusCode === 410) {
-          console.log(`[DEBUG] Eliminando suscripción inválida para el usuario: ${userName} (${userId})`);
-          try {
-            await db.collection('suscripciones').doc(userId).delete();
-          } catch (deleteError) {
-            console.error(`[DEBUG] Error al eliminar suscripción inválida: ${deleteError.message}`);
-          }
+        if (notificacionesDoc.exists) {
+            const config = notificacionesDoc.data();
+            console.log(`[DEBUG] Configuración encontrada para ${clientId}:`, config);
+            return config;
         }
-      
-        results.push({ userId, userName, success: false, error: error.message });
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 100));
+        
+        console.log(`[DEBUG] No se encontró configuración para ${clientId}. Usando defaults.`);
+        return {
+            enableNotifications: true,
+            enableAttendanceReminder: true,
+            attendanceReminderFrequency: 30,
+            attendanceReminderTime: '09:00', // Default simple string
+            enableClosingReminder: true,
+            closingReminderTime: '18:00', // Default simple string
+            enableTripNotifications: true,
+            batchSize: 10,
+            retryAttempts: 3
+        };
+    } catch (error) {
+        console.error('[DEBUG] Error al obtener config:', error);
+        return null;
     }
-    
-    console.log(`[DEBUG] Resultados del envío para "${clientName}":`, results);
-    return { success: true, results };
-  } catch (error) {
-    console.error('[DEBUG] Error al enviar recordatorios:', error);
-    return { success: false, error: error.message };
-  }
-}
-
-// --- FUNCIÓN MEJORADA: Ahora considera la zona horaria y el nuevo formato de hora ---
-function isWithinReminderRange(startTime, endTime) {
-  // 1. Obtener la hora actual UTC
-  const nowUTC = new Date();
-  console.log(`[DEBUG] Hora actual en el servidor (UTC): ${nowUTC.toISOString()}`);
-
-  // 2. Ajustar a la zona horaria local (Venezuela, UTC-4)
-  const offsetHours = -4; 
-  const nowLocal = new Date(nowUTC.getTime() + (offsetHours * 60 * 60 * 1000));
-  console.log(`[DEBUG] Hora ajustada a la zona local (UTC${offsetHours}): ${nowLocal.toISOString()}`);
-  
-  const currentMinutes = nowLocal.getHours() * 60 + nowLocal.getMinutes();
-  console.log(`[DEBUG] Hora actual en minutos para la comprobación: ${currentMinutes}`);
-  
-  // CORRECCIÓN: Manejar el nuevo formato de hora (objeto con time y ampm)
-  let startHour, startMinute, endHour, endMinute;
-  
-  if (typeof startTime === 'object' && startTime.time) {
-    // Nuevo formato: objeto con time y ampm
-    const [startHours, startMinutes] = startTime.time.split(':').map(Number);
-    const [endHours, endMinutes] = endTime.time.split(':').map(Number);
-    
-    // Convertir a formato 24h
-    startHour = startTime.ampm === 'PM' && startHours < 12 ? startHours + 12 : startHours;
-    startMinute = startMinutes;
-    endHour = endTime.ampm === 'PM' && endHours < 12 ? endHours + 12 : endHours;
-    endMinute = endMinutes;
-  } else {
-    // Formato antiguo: cadena "HH:MM"
-    const [startHours, startMinutes] = startTime.split(':').map(Number);
-    const [endHours, endMinutes] = endTime.split(':').map(Number);
-    
-    startHour = startHours;
-    startMinute = startMinutes;
-    endHour = endHours;
-    endMinute = endMinutes;
-  }
-  
-  const startMinutes = startHour * 60 + startMinute;
-  const endMinutes = endHour * 60 + endMinute;
-  
-  let isInRange;
-  if (startMinutes > endMinutes) {
-    isInRange = currentMinutes >= startMinutes || currentMinutes <= endMinutes;
-    console.log(`[DEBUG] Verificación de hora (cruce medianoche): Actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
-  } else {
-    isInRange = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
-    console.log(`[DEBUG] Verificación de hora: Actual=${currentMinutes}, Inicio=${startMinutes}, Fin=${endMinutes}, DentroDeRango=${isInRange}`);
-  }
-  
-  return isInRange;
 }
 
 exports.handler = async function (event, context) {
-  console.log('=== INICIO send-attendance-reminder (VERSIÓN MEJORADA CON NOMBRES) ===');
-  console.log(`[DEBUG] Hora de ejecución del servidor (UTC): ${new Date().toISOString()}`);
+    console.log('=== INICIO send-attendance-reminder (VERSIÓN MEJORADA CON NOMBRES) ===');
+    console.log(`[DEBUG] Hora de ejecución del servidor (UTC): ${new Date().toISOString()}`);  
   
-  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || 
-      !process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
-    console.error('[DEBUG] Configuración incompleta. Verifica las variables de entorno.');
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Configuración incompleta' }),
-    };
-  }
-  
-  try {
-    const db = admin.firestore();
-    const clientsSnapshot = await db.collection('clientes').get();
-    
-    if (clientsSnapshot.empty) {
-      console.log('[DEBUG] No hay clientes activos.');
-      return { 
-        statusCode: 200, 
-        body: JSON.stringify({ message: 'No hay clientes activos.' }) 
-      };
-    }
-    
-    console.log(`[DEBUG] Se encontraron ${clientsSnapshot.size} clientes para procesar.`);
-    const results = [];
-    
-    for (const clientDoc of clientsSnapshot.docs) {
-      const clientId = clientDoc.id;
-      const clientName = clientDoc.data().nombre || 'Cliente sin nombre';
-      
-      console.log(`[DEBUG] --- Procesando cliente: ${clientName} (${clientId}) ---`);
-      
-      const config = await getNotificationConfig(clientId);
-      
-      if (!config || !config.enableNotifications || !config.enableAttendanceReminder) {
-        console.log(`[DEBUG] Recordatorios de asistencia desactivados para el cliente: ${clientName}`);
-        continue;
-      }
-
-      console.log(`[DEBUG] Configuración para ${clientName}:`, config);
-
-      if (!isWithinReminderRange(config.attendanceReminderStartTime, config.attendanceReminderEndTime)) {
-        console.log(`[DEBUG] Fuera del rango horario de recordatorios para: ${clientName}`);
-        continue;
-      }
-      
-      const nowUTC = new Date();
-      const offsetHours = -4; // Mismo offset que en la función de comprobación
-      const nowLocal = new Date(nowUTC.getTime() + (offsetHours * 60 * 60 * 1000));
-      const currentMinutes = nowLocal.getHours() * 60 + nowLocal.getMinutes();
-      
-      const frequencyInMinutes = config.attendanceReminderFrequency || 30;
-      const shouldRun = currentMinutes % frequencyInMinutes === 0;
-      console.log(`[DEBUG] Verificación de frecuencia: Minutos actuales=${currentMinutes}, Frecuencia=${frequencyInMinutes}, DebeEjecutarse=${shouldRun}`);
-      
-      if (!shouldRun) {
-        console.log(`[DEBUG] No es hora de enviar recordatorio para: ${clientName}`);
-        continue;
-      }
-      
-      console.log(`[DEBUG] Enviando recordatorio de asistencia para: ${clientName}`);
-      
-      const employeesNeedingReminder = await getEmployeesNeedingReminder(clientId);
-      
-      if (employeesNeedingReminder.length > 0) {
-        console.log(`[DEBUG] ${employeesNeedingReminder.length} empleados necesitan recordatorio. Preparando payload...`);
-        const payload = {
-          title: '¡Recordatorio de Asistencia!',
-          body: 'Aún no has registrado tu asistencia ni zona de destino para hoy.',
-          icon: '/erick-go-logo.png',
-          tag: 'attendance-reminder',
-          renotify: true,
-          requireInteraction: true,
-          actions: [
-            {
-              action: 'register_attendance',
-              title: 'Registrar Asistencia'
-            },
-            {
-              action: 'opt_out_transport',
-              title: 'No Usar Transporte Hoy'
-            }
-          ],
-          data: {
-            url: '/login',
-            type: 'attendance_reminder'
-          }
+    if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || 
+          !process.env.FIREBASE_PROJECT_ID) {
+        console.error('[DEBUG] Configuración incompleta.');
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'Configuración incompleta' }),
         };
-        
-        // CAMBIO CLAVE: Pasamos el nombre del cliente a la función
-        const result = await sendNotificationsToUsers(employeesNeedingReminder, payload, clientId, clientName);
-        results.push({
-          clientId,
-          clientName,
-          type: 'attendance_reminder_interactive',
-          recipients: employeesNeedingReminder.length,
-          result
-        });
-      } else {
-        console.log(`[DEBUG] Todos los empleados han registrado asistencia o han optado por salir para: ${clientName}`);
-      }
     }
-    
-    console.log('=== FIN send-attendance-reminder (VERSIÓN MEJORADA CON NOMBRES) ===');
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ 
-        message: 'Proceso de recordatorios interactivos completado.',
-        results: results
-      }),
-    };
-  } catch (error) {
-    console.error('[DEBUG] Error en la función de recordatorio interactivo:', error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Error interno del servidor', details: error.message }),
-    };
-  }
+  
+    try {
+        const db = admin.firestore();
+        const clientsSnapshot = await db.collection('clientes').get();
+        
+        if (clientsSnapshot.empty) {
+            console.log('[DEBUG] No hay clientes activos.');
+            return { 
+                statusCode: 200, 
+                body: JSON.stringify({ message: 'No hay clientes activos.' }) 
+            };
+        }
+        
+        const results = [];
+        
+        for (const clientDoc of clientsSnapshot.docs) {
+            const clientId = clientDoc.id;
+            const clientName = clientDoc.data().nombre || 'Cliente sin nombre';
+            
+            console.log(`[DEBUG] --- Procesando cliente: ${clientName} (${clientId}) ---`);
+            
+            const config = await getNotificationConfig(clientId);
+            
+            if (!config || !config.enableNotifications || !config.enableAttendanceReminder) {
+                console.log(`[DEBUG] Recordatorios de asistencia desactivados para: ${clientName}`);
+                continue;
+            }
+
+            // Manejo de hora: Soportar tanto objeto 12h como string 24h
+            let reminderTime24h;
+            if (typeof config.attendanceReminderTime === 'object' && config.attendanceReminderTime.time) {
+                const { time, ampm } = config.attendanceReminderTime;
+                const [hours, minutes] = time.split(':');
+                let hoursNum = parseInt(hours, 10);
+                if (ampm === 'PM' && hoursNum < 12) hoursNum += 12;
+                if (ampm === 'AM' && hoursNum === 12) hoursNum = 0;
+                reminderTime24h = `${hoursNum.toString().padStart(2,'0')}:${minutes}`;
+            } else {
+                reminderTime24h = config.attendanceReminderTime;
+            }
+
+            const now = new Date();
+            const targetHour = parseInt(reminderTime24h.split(':')[0], 10);
+            const targetMinute = parseInt(reminderTime24h.split(':')[1], 10);
+            
+            // Zona horaria Venezuela (-4 horas)
+            const nowHour = (now.getHours() - 4 + 24) % 24; // Ajuste simple a GMT-4
+            const nowMinute = now.getMinutes();
+            
+            // Verificar si es la hora exacta (o 15 minutos después)
+            const isExactTime = (nowHour === targetHour && nowMinute >= targetMinute && nowMinute <= targetMinute + 15);
+            const isExactTime15 = (nowHour === targetHour && nowMinute >= targetMinute + 16 && nowMinute <= targetMinute + 30);
+            
+            if (isExactTime || isExactTime15) {
+                console.log(`[DEBUG] Dentro de la ventana horaria (${reminderTime24h}) para ${clientName}. Buscando empleados...`);
+            } else {
+                console.log(`[DEBUG] Fuera de la ventana horaria para ${clientName}.`);
+                continue;
+            }
+
+            const vinculosSnapshot = await db.collection('vinculos')
+                .where('clientId', '==', clientId)
+                .where('rol', '==', 'empleado')
+                .where('activo', '==', true)
+                .get();
+            
+            if (vinculosSnapshot.empty) continue;
+            const employeeIds = vinculosSnapshot.docs.map(doc => doc.data().userId);
+            
+            // Filtrar empleados que ya optaron por no usar transporte hoy
+            const suscripcionesSnapshot = await db.collection('suscripciones')
+                .where('clientId', '==', clientId)
+                .where('dailyOptOut', '==', true)
+                .get();
+            
+            const optedOutUserIds = new Set();
+            suscripcionesSnapshot.forEach(doc => {
+                const data = doc.data();
+                const optOutDate = data.dailyOptOutDate ? data.dailyOptOutDate.toDate() : null;
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                if (optOutDate && optOutDate.getTime() === today.getTime()) {
+                    optedOutUserIds.add(data.userId);
+                }
+            });
+            
+            const targetEmployees = employeeIds.filter(id => !optedOutUserIds.has(id));
+            
+            if (targetEmployees.length === 0) {
+                console.log(`[DEBUG] No hay objetivos válidos para ${clientName}`);
+                continue;
+            }
+            
+            const payload = {
+                title: 'Recordatorio de Asistencia',
+                body: 'Aún no has registrado tu asistencia ni seleccionado zona de destino. Por favor hazlo.',
+                icon: '/erick-go-logo.png',
+                tag: 'attendance-reminder',
+                renotify: true,
+                requireInteraction: true,
+                actions: [
+                    {
+                        action: 'register_attendance',
+                        title: 'Registrar Asistencia'
+                    },
+                    {
+                        action: 'opt_out_transport',
+                        title: 'No Usar Transporte Hoy'
+                    }
+                ],
+                data: {
+                    url: '/login',
+                    type: 'attendance_reminder'
+                }
+            };
+            
+            console.log(`[DEBUG] Enviando notificación a ${targetEmployees.length} empleados de ${clientName}`);
+            
+            let sentCount = 0;
+            for (const userId of targetEmployees) {
+                try {
+                    // Buscar suscripción específica del usuario
+                    const subDoc = await db.collection('suscripciones').doc(userId).get();
+                    if (!subDoc.exists()) continue;
+                    
+                    const subscription = subDoc.data().subscription;
+                    if (!subscription || !subscription.endpoint) continue;
+
+                    // Obtener nombre del usuario
+                    const userDoc = await db.collection('usuarios').doc(userId).get();
+                    const userName = userDoc.exists() ? userDoc.data().nombre : 'Empleado';
+                    
+                    // Personalizar payload con nombre
+                    const personalizedPayload = {
+                        ...payload,
+                        body: `${userName}, ${payload.body}`,
+                        data: { ...payload.data, userId: userId, clientId: clientId, userName: userName }
+                    };
+
+                    await webpush.sendNotification(subscription, JSON.stringify(personalizedPayload));
+                    sentCount++;
+                } catch (error) {
+                    if (error.statusCode === 410) {
+                        console.log(`[DEBUG] Eliminando suscripción inválida de ${userId}`);
+                        await db.collection('suscripciones').doc(userId).delete();
+                    }
+                }
+            }
+            
+            results.push({
+                clientId,
+                clientName,
+                type: 'attendance_reminder_interactive',
+                recipients: targetEmployees.length,
+                sentCount: sentCount
+            });
+        }
+        
+        console.log('=== FIN send-attendance-reminder (VERSIÓN MEJORADA CON NOMBRES) ===');
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ 
+                message: 'Proceso de recordatorio interactivo completado.',
+                results: results
+            }),
+        };
+    } catch (error) {
+        console.error('[DEBUG] Error en la función de recordatorio interactivo:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'Error interno del servidor', details: error.message }),
+        };
+    }
 };

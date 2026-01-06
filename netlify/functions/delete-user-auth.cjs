@@ -1,27 +1,34 @@
-// netlify/functions/delete-user-auth.js
+// netlify/functions/delete-user-auth.cjs
 const admin = require('firebase-admin');
 
 // ====================================================================
-// INICIALIZACIÓN
+// INICIALIZACIÓN (CLAVE DIVIDIDA)
 // ====================================================================
-if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-    console.error(">>> [FATAL] Variable de entorno faltante");
-    throw new Error("Configuración faltante");
-}
+const getFullServiceAccount = () => {
+    const part1 = process.env.FIREBASE_KEY_PART_1 || '';
+    const part2 = process.env.FIREBASE_KEY_PART_2 || '';
+    const part3 = process.env.FIREBASE_KEY_PART_3 || '';
 
-let serviceAccount;
-try {
-    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-} catch (error) {
-    console.error(">>> [ERROR] Error parseando clave:", error);
-    throw new Error("Formato inválido en FIREBASE_SERVICE_ACCOUNT_KEY");
-}
+    if (part1 && part2 && part3) {
+        return `${part1}${part2}${part3}`;
+    }
+    return process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+};
 
 if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
-    console.log(">>> [SUCCESS] Firebase Admin inicializado.");
+    try {
+        const serviceAccountKey = getFullServiceAccount();
+        const serviceAccount = JSON.parse(serviceAccountKey);
+        
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
+        });
+        console.log('>>> [SUCCESS] Firebase Admin inicializado (Clave Unificada).');
+    } catch (error) {
+        console.error('>>> [ERROR] Error al inicializar Firebase Admin:', error);
+        throw new Error("Configuración faltante");
+    }
 }
 
 // ====================================================================
@@ -71,7 +78,6 @@ exports.handler = async (event, context) => {
             try {
                 const subRef = db.collection('suscripciones').doc(uid);
                 const subSnap = await subRef.get();
-                // CORRECCIÓN AQUÍ: Usar .exists como propiedad (sin paréntesis)
                 if (subSnap.exists) {
                     await subRef.delete();
                     console.log(`>>> [BACKEND] Suscripción eliminada.`);

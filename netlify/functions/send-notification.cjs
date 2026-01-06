@@ -1,31 +1,50 @@
-// netlify/functions/send-notification.js
-
+// netlify/functions/send-notification.cjs
 const webPush = require('web-push');
 const admin = require('firebase-admin');
 
-// Configurar claves VAPID
-webPush.setVapidDetails(
-  'mailto:erickgoapp@gmail.com',
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
+// ====================================================================
+// INICIALIZACIÓN (CLAVE DIVIDIDA)
+// ====================================================================
+const getFullServiceAccount = () => {
+    const part1 = process.env.FIREBASE_KEY_PART_1 || '';
+    const part2 = process.env.FIREBASE_KEY_PART_2 || '';
+    const part3 = process.env.FIREBASE_KEY_PART_3 || '';
+
+    if (part1 && part2 && part3) {
+        return `${part1}${part2}${part3}`;
+    }
+    return process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+};
 
 // Inicializar Firebase Admin si no está inicializado
 if (!admin.apps.length) {
-  try {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        project_id: process.env.FIREBASE_PROJECT_ID,
-        client_email: process.env.FIREBASE_CLIENT_EMAIL,
-        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-      }),
-      databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
-    });
-    console.log('Firebase Admin inicializado correctamente.');
-  } catch (error) {
-    console.error('Error al inicializar Firebase Admin:', error);
-  }
+    try {
+        const serviceAccountKey = getFullServiceAccount();
+        const serviceAccount = JSON.parse(serviceAccountKey);
+        
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
+        });
+        console.log('>>> [SUCCESS] Firebase Admin inicializado en send-notification (Clave Unificada).');
+    } catch (error) {
+        console.error('>>> [ERROR] Error al inicializar Firebase Admin:', error);
+        throw new Error("Configuración faltante");
+    }
 }
+
+// Configurar claves VAPID
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webPush.setVapidDetails(
+        'mailto:erickgoapp@gmail.com',
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+    );
+}
+
+// ====================================================================
+// FUNCIONES AUXILIARES
+// ====================================================================
 
 // Función para obtener suscripciones de usuarios desde Firestore
 async function getUserSubscriptions(userIds, clientId = null) {
@@ -38,15 +57,12 @@ async function getUserSubscriptions(userIds, clientId = null) {
       return [];
     }
 
-    // MEJORA CLAVE: Creamos una consulta más eficiente si tenemos un clientId
     let query = db.collection('suscripciones');
     
     if (clientId) {
-      // Si tenemos un clientId, primero filtramos por clientId y luego por userIds
       query = query.where('clientId', '==', clientId);
       const snapshot = await query.get();
       
-      // Filtramos los resultados para obtener solo los userIds que necesitamos
       snapshot.forEach(doc => {
         const data = doc.data();
         if (userIds.includes(data.userId)) {
@@ -81,6 +97,9 @@ async function getUserSubscriptions(userIds, clientId = null) {
   }
 }
 
+// ====================================================================
+// HANDLER DE LA FUNCIÓN
+// ====================================================================
 exports.handler = async function (event, context) {
   console.log('=== INICIO send-notification (versión mejorada) ===');
   
@@ -109,21 +128,21 @@ exports.handler = async function (event, context) {
         };
       }
 
-      // Obtenemos las suscripciones filtrando por clientId si está disponible
+      // Obtenemos las suscripciones
       const subscriptions = await getUserSubscriptions(targetUserIds, clientId);
       
       if (subscriptions.length === 0) {
         console.log('No se encontraron suscripciones para los usuarios seleccionados.');
         return {
           statusCode: 200,
-          body: JSON.stringify({ message: 'No hay suscripciones para notificar' }),
+          body: JSON.stringify({ message: 'No hay suscripciones para notificar' })
         };
       }
 
       console.log(`Enviando notificación a ${subscriptions.length} suscripciones encontradas.`);
       
-      // MEJORA CLAVE: Procesamos las notificaciones en lotes para mejorar el rendimiento
-      const batchSize = 10; // Procesamos en lotes de 10 para evitar sobrecarga
+      // Procesamos las notificaciones en lotes para evitar sobrecarga
+      const batchSize = 10;
       const results = [];
       
       for (let i = 0; i < subscriptions.length; i += batchSize) {
@@ -131,7 +150,6 @@ exports.handler = async function (event, context) {
         const batchResults = await Promise.allSettled(
           batch.map(async ({ userId, subscription }) => {
             try {
-              // MEJORA: Añadimos un timestamp para asegurar que la notificación se procese rápidamente
               const payloadWithTimestamp = {
                 ...payload,
                 timestamp: Date.now()
@@ -143,7 +161,7 @@ exports.handler = async function (event, context) {
             } catch (error) {
               console.error(`❌ Error al enviar notificación al usuario ${userId}:`, error.message);
               
-              // MEJORA CLAVE: Si el error es 410 (Gone), significa que la suscripción ya no es válida
+              // Si el error es 410 (Gone), significa que la suscripción ya no es válida
               if (error.statusCode === 410) {
                 console.log(`Eliminando suscripción inválida para el usuario: ${userId}`);
                 try {
@@ -161,7 +179,7 @@ exports.handler = async function (event, context) {
         
         results.push(...batchResults);
         
-        // Pequeña pausa entre lotes para evitar sobrecargar el servicio
+        // Pequeña pausa entre lotes
         if (i + batchSize < subscriptions.length) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }

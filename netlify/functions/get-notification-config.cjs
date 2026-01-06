@@ -1,49 +1,59 @@
-// netlify/functions/get-notification-config.js
-
+// netlify/functions/get-notification-config.cjs
 const admin = require('firebase-admin');
 
-// Inicializar Firebase Admin si no está inicializado
+// ====================================================================
+// INICIALIZACIÓN (CLAVE DIVIDIDA)
+// ====================================================================
+const getFullServiceAccount = () => {
+    const part1 = process.env.FIREBASE_KEY_PART_1 || '';
+    const part2 = process.env.FIREBASE_KEY_PART_2 || '';
+    const part3 = process.env.FIREBASE_KEY_PART_3 || '';
+
+    if (part1 && part2 && part3) {
+        return `${part1}${part2}${part3}`;
+    }
+    return process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+};
+
 if (!admin.apps.length) {
-  try {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        project_id: process.env.FIREBASE_PROJECT_ID,
-        client_email: process.env.FIREBASE_CLIENT_EMAIL,
-        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-      }),
-      databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
-    });
-    console.log('Firebase Admin inicializado correctamente');
-  } catch (error) {
-    console.error('Error al inicializar Firebase Admin:', error);
-  }
+    try {
+        const serviceAccountKey = getFullServiceAccount();
+        const serviceAccount = JSON.parse(serviceAccountKey);
+        
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
+        });
+        console.log('>>> [SUCCESS] Firebase Admin inicializado (Clave Unificada).');
+    } catch (error) {
+        console.error('>>> [ERROR] Error al inicializar Firebase Admin:', error);
+        throw new Error("Configuración faltante");
+    }
 }
 
-// Configuraciones por defecto específicas para cada empresa
+// ====================================================================
+// CONFIGURACIONES POR DEFECTO ESPECÍFICAS
+// ====================================================================
 const DEFAULT_CONFIGS = {
   'irjKu853x42zZc1hcRW6': { // Croii Soledad
     enableNotifications: true,
     enableAttendanceReminder: true,
-    attendanceReminderStartTime: '14:00', // 2:00 PM en formato 24h
-    attendanceReminderEndTime: '22:30',   // 10:30 PM en formato 24h
+    attendanceReminderStartTime: { time: '02:00', ampm: 'PM' }, 
+    attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },   
     attendanceReminderFrequency: 5,
     enableClosingReminder: true,
-    closingReminderTime: '18:00', // 6:00 PM en formato 24h
+    closingReminderTime: { time: '06:00', ampm: 'PM' },
     enableTripNotifications: true,
-    batchSize: 10,
-    retryAttempts: 3
   },
   'yAPjLzpN1bRyX5k5ljhZ': { // Croii Aviadores
     enableNotifications: true,
     enableAttendanceReminder: true,
-    attendanceReminderStartTime: '12:00', // 12:00 PM en formato 24h
-    attendanceReminderEndTime: '20:00',   // 8:00 PM en formato 24h
+    attendanceReminderStartTime: { time: '12:00', ampm: 'PM' }, 
+    attendanceReminderEndTime: { time: '08:00', ampm: 'PM' },   
     attendanceReminderFrequency: 5,
     enableClosingReminder: true,
-    closingReminderTime: '20:00', // 8:00 PM en formato 24h
+    closingReminderTime: { time: '08:00', ampm: 'PM' },
     enableTripNotifications: true,
-    batchSize: 10,
-    retryAttempts: 3
   }
 };
 
@@ -79,20 +89,25 @@ exports.handler = async function (event, context) {
     
     if (doc.exists) {
       config = doc.data();
-      console.log(`Configuración de notificaciones encontrada para cliente: ${clientId}`);
+      console.log(`Configuración de notificaciones cargada para cliente: ${clientId}`);
     } else {
-      console.log(`No se encontró configuración de notificaciones para cliente: ${clientId}. Se devolverá una configuración por defecto específica.`);
-      // Devolvemos una configuración por defecto específica para cada empresa
-      config = DEFAULT_CONFIGS[clientId] || {
-        enableNotifications: true,
-        enableAttendanceReminder: true,
-        attendanceReminderTime: '07:00',
-        enableClosingReminder: true,
-        closingReminderTime: '18:00',
-        enableTripNotifications: true,
-        batchSize: 10,
-        retryAttempts: 3
-      };
+      // Si no hay configuración en el backend, usar la configuración por defecto específica de la empresa
+      if (DEFAULT_CONFIGS[clientId]) {
+        config = DEFAULT_CONFIGS[clientId];
+        console.log(`Usando configuración por defecto para ${clientId}:`, DEFAULT_CONFIGS[clientId]);
+      } else {
+         // Fallback si el cliente no está en el default
+         config = {
+            enableNotifications: true,
+            enableAttendanceReminder: true,
+            attendanceReminderStartTime: { time: '07:00', ampm: 'AM' },
+            attendanceReminderEndTime: { time: '10:30', ampm: 'PM' },
+            attendanceReminderFrequency: 30,
+            enableClosingReminder: true,
+            closingReminderTime: { time: '06:00', ampm: 'PM' },
+            enableTripNotifications: true,
+         };
+      }
     }
 
     return {
@@ -104,7 +119,7 @@ exports.handler = async function (event, context) {
       }),
     };
   } catch (error) {
-    console.error('Error al obtener la configuración de notificaciones:', error);
+    console.error('Error al obtener configuración de notificaciones:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: 'Error interno del servidor', details: error.message }),
