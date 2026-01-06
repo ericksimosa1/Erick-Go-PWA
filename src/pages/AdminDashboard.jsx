@@ -10,7 +10,7 @@ import {
 } from '@mui/icons-material';
 import { useFirestore } from '../hooks/useFirestore';
 import { useAuthStore } from '../store/authStore';
-import { db } from '../firebase'; // <--- IMPORTANTE: Falta esta importación causaba el error
+import { db } from '../firebase';
 import { collection, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
 import RegisterUserModal from '../components/RegisterUserModal';
 import NotificationSettings from '../components/NotificationSettings';
@@ -50,7 +50,8 @@ export default function AdminDashboard() {
         updateWeeklyClosingConfig,
         getTodayClosingPersonFromWeeklyConfig,
         convertTo12HourFormat,
-        convertTo24HourFormat
+        convertTo24HourFormat,
+        deleteUserPermanently // IMPORTANTE: Importar nueva función
     } = useFirestore();
 
     const [users, setUsers] = useState([]);
@@ -248,8 +249,11 @@ export default function AdminDashboard() {
 
         console.log(`[handleEditUser] Usuario encontrado en el estado actual: ${currentUserInState.userData.nombre} con vinculoId: ${currentUserInState.vinculoId}`);
 
+        // Clonamos el objeto para no mutar el estado directamente antes de editar
         const userWithGroups = {
             ...currentUserInState,
+            // Importante: asegurar que userData sea editable
+            userData: { ...currentUserInState.userData },
             gruposZonas: currentUserInState.gruposZonas || []
         };
         setEditUserDialog({ 
@@ -269,6 +273,13 @@ export default function AdminDashboard() {
                 return;
             }
             
+            // 1. Actualizar datos básicos del usuario (Nombre, Teléfono) en la colección 'usuarios'
+            await updateUser(user.userId, {
+                nombre: user.userData.nombre,
+                telefono: user.userData.telefono
+            });
+
+            // 2. Actualizar datos del vínculo (Zonas, Grupos) en la colección 'vinculos'
             const gruposZonas = user.gruposZonas || [];
             const zonasAsignadas = user.zonasAsignadas || [];
             
@@ -279,12 +290,13 @@ export default function AdminDashboard() {
             setUsers(prevUsers => 
                 prevUsers.map(u => 
                     u.vinculoId === vinculoId 
-                        ? { ...u, gruposZonas, zonasAsignadas }
+                        ? { ...u, userData: { ...u.userData, nombre: user.userData.nombre, telefono: user.userData.telefono }, gruposZonas, zonasAsignadas }
                         : u
                 )
             );
             
             setEditUserDialog({ open: false, user: null, vinculoId: null });
+            alert("Usuario actualizado correctamente.");
 
         } catch (error) {
             console.error("Error al guardar usuario:", error);
@@ -292,7 +304,15 @@ export default function AdminDashboard() {
         }
     };
 
+    // MODIFICACIÓN: Borrado Permanente con confirmación
     const handleDeleteUser = async (userToDelete) => {
+        const confirmDelete = window.confirm(
+            `¿Estás seguro de que deseas eliminar a ${userToDelete.userData.nombre}?\n\n` +
+            `Esto eliminará su vínculo con la empresa. Si el usuario no trabaja en otras empresas, su cuenta será eliminada permanentemente del sistema.`
+        );
+
+        if (!confirmDelete) return;
+
         try {
             if (!userToDelete || !userToDelete.vinculoId) {
                 console.error("ID de vínculo de usuario no disponible:", userToDelete);
@@ -300,9 +320,18 @@ export default function AdminDashboard() {
                 return;
             }
             
-            await deactivateUserVinculo(userToDelete.vinculoId);
+            // Llamamos a la función de borrado inteligente del Hook
+            const result = await deleteUserPermanently(userToDelete.userId, selectedClientId);
             
-            setUsers(prevUsers => prevUsers.filter(u => u.vinculoId !== userToDelete.vinculoId));
+            if (result.success) {
+                if (result.isLastLink) {
+                    alert("Usuario eliminado permanentemente del sistema.");
+                } else {
+                    alert("Usuario eliminado de esta empresa. Su cuenta sigue activa en otras empresas.");
+                }
+                
+                setUsers(prevUsers => prevUsers.filter(u => u.vinculoId !== userToDelete.vinculoId));
+            }
 
         } catch (error) {
             console.error("Error al eliminar usuario:", error);
@@ -531,6 +560,20 @@ export default function AdminDashboard() {
         setEditUserDialog(prev => ({
             ...prev,
             user: { ...prev.user, zonasAsignadas: newZonas }
+        }));
+    };
+    
+    // Función para manejar cambios en los inputs de texto (Nombre, Teléfono)
+    const handleUserDataChange = (field, value) => {
+        setEditUserDialog(prev => ({
+            ...prev,
+            user: {
+                ...prev.user,
+                userData: {
+                    ...prev.user.userData,
+                    [field]: value
+                }
+            }
         }));
     };
 
@@ -823,6 +866,23 @@ export default function AdminDashboard() {
         } finally {
             setWeeklyConfigLoading(false);
         }
+    };
+
+    // LÓGICA DE FILTRADO DE ZONAS PARA CONDUCTORES
+    // Zonas disponibles = Zonas totales - Zonas asignadas a OTROS conductores
+    const getAvailableZonesForDriver = (currentDriverUserId) => {
+        if (!currentDriverUserId) return zones;
+
+        // Obtener IDs de zonas asignadas a otros conductores
+        const otherDriversZonesIds = new Set();
+        users.forEach(u => {
+            if (u.userData.rol === 'conductor' && u.userId !== currentDriverUserId) {
+                (u.zonasAsignadas || []).forEach(zoneId => otherDriversZonesIds.add(zoneId));
+            }
+        });
+
+        // Filtrar zonas
+        return zones.filter(z => !otherDriversZonesIds.has(z.id));
     };
 
     return (
@@ -1451,7 +1511,8 @@ export default function AdminDashboard() {
                                                 <Select
                                                     labelId={`${day.key}-person-select-label`}
                                                     id={`${day.key}-person-select`}
-                                                    value={weeklyClosingConfig[day.key]?.vinculoId || ''}
+                                                    // CORRECCIÓN: Optional chaining para evitar crash si weeklyClosingConfig es null por algún error
+                                                    value={weeklyClosingConfig?.[day.key]?.vinculoId || ''}
                                                     label="Encargado"
                                                     onChange={(e) => handleWeeklyConfigChange(day.key, e.target.value)}
                                                 >
@@ -1465,7 +1526,8 @@ export default function AdminDashboard() {
                                                     ))}
                                                 </Select>
                                             </FormControl>
-                                            {weeklyClosingConfig[day.key]?.userName && (
+                                            {/* CORRECCIÓN: Optional chaining */}
+                                            {weeklyClosingConfig?.[day.key]?.userName && (
                                                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                                                     Actual: {weeklyClosingConfig[day.key].userName}
                                                 </Typography>
@@ -1554,17 +1616,33 @@ export default function AdminDashboard() {
             <Dialog open={editUserDialog.open} onClose={() => setEditUserDialog({ open: false, user: null, vinculoId: null })} maxWidth="md" fullWidth>
                 <DialogTitle>Editar Usuario</DialogTitle>
                 <DialogContent sx={{ maxHeight: '70vh', overflow: 'auto' }}>
-                    <TextField margin="dense" label="Nombre" fullWidth variant="standard" value={editUserDialog.user?.userData?.nombre || ''} disabled />
+                    {/* CAMBIOS AQUÍ: Inputs Habilitados */}
+                    <TextField 
+                        margin="dense" 
+                        label="Nombre" 
+                        fullWidth 
+                        variant="standard" 
+                        value={editUserDialog.user?.userData?.nombre || ''} 
+                        onChange={(e) => handleUserDataChange('nombre', e.target.value)}
+                    />
                     <TextField margin="dense" label="Correo Electrónico" fullWidth variant="standard" value={editUserDialog.user?.userData?.correo || ''} disabled />
-                    <TextField margin="dense" label="Teléfono" fullWidth variant="standard" value={editUserDialog.user?.userData?.telefono || ''} disabled />
+                    <TextField 
+                        margin="dense" 
+                        label="Teléfono" 
+                        fullWidth 
+                        variant="standard" 
+                        value={editUserDialog.user?.userData?.telefono || ''} 
+                        onChange={(e) => handleUserDataChange('telefono', e.target.value)}
+                    />
                     <TextField margin="dense" label="Rol" fullWidth variant="standard" value={editUserDialog.user?.userData?.rol || ''} disabled />
                     
                     {editUserDialog.user?.userData?.rol === 'conductor' && (
                         <React.Fragment>
                             <Box sx={{ mt: 3 }}>
                                 <Typography variant="subtitle1" sx={{ mb: 1 }}>Asignar Zonas Individuales:</Typography>
+                                {/* CAMBIO AQUÍ: Filtrar zonas disponibles */}
                                 <List>
-                                {zones.map((zone) => {
+                                {getAvailableZonesForDriver(editUserDialog.user.userId).map((zone) => {
                                     const currentZonas = editUserDialog.user?.zonasAsignadas || [];
                                     const isAssigned = currentZonas.includes(zone.id);
                                     return (

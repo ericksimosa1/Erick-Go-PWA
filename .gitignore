@@ -3,3 +3,8 @@
 
 # Vite metadata
 _metadata.json
+
+# --- CLAVES Y SECRETO (CRÍTICO) ---
+.env
+.env.local
+.firebase-service-account.json

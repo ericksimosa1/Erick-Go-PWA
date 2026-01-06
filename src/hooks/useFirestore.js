@@ -30,6 +30,42 @@ export const useFirestore = () => {
         return null;
     }, []);
 
+    // NUEVA FUNCIÓN DE BORRADO PERMANENTE SERVIDOR
+        const deleteUserPermanently = useCallback(async (userId, clientId) => {
+        try {
+            console.log(`>>> [INFO] Solicitando eliminación de usuario ${userId} del cliente ${clientId} (Backend)`);
+            
+            // Llamamos al servidor para hacer todo el trabajo pesado
+            const response = await fetch('/.netlify/functions/delete-user-auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    uid: userId, 
+                    clientId: clientId 
+                }),
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(">>> [ERROR DEL SERVIDOR]:", errorText);
+                throw new Error(errorText || 'Error al eliminar usuario en el servidor');
+            }
+
+            const result = await response.json();
+            console.log(`>>> [SUCCESS] Usuario eliminado correctamente según el servidor.`);
+            
+            // =================================================================
+            // ESTA ES LA LÍNEA QUE FALTABA Y ES MUY IMPORTANTE
+            // =================================================================
+            return { success: true, isLastLink: result.isLastLink };
+            // =================================================================
+            
+        } catch (error) {
+            console.error(">>> [ERROR] Error en deleteUserPermanently:", error);
+            throw error;
+        }
+    }, []);
+
     // NUEVA FUNCIÓN: Obtener administradores globales (no vinculados a empresas)
     const fetchGlobalAdministrators = useCallback(async () => {
         try {
@@ -478,18 +514,37 @@ export const useFirestore = () => {
 
     // --- NUEVAS FUNCIONES PARA CONFIGURACIÓN GLOBAL ---
     const fetchGlobalConfig = useCallback(async () => {
-        const configRef = doc(db, 'configuracion', 'global');
-        const configSnap = await getDoc(configRef);
-        if (configSnap.exists()) {
-            return configSnap.data();
+        try {
+            const configRef = doc(db, 'configuracion', 'global');
+            const configSnap = await getDoc(configRef);
+            
+            if (configSnap.exists()) {
+                return configSnap.data();
+            }
+            
+            // Si no existe, devolvemos un texto por defecto
+            return { 
+                loginFooterText: 'Copyright © 2025 Desarrollado por Erick Go\nContacto: erickgoapp@gmail.com' 
+            };
+        } catch (error) {
+            // CAPTURA DEL ERROR: Si falla por permisos, logueamos pero no detenemos la app
+            console.error(">>> [ERROR] Error al cargar configuración global (probablemente permisos):", error);
+            
+            // Devolvemos texto por defecto para que el Login pueda seguir funcionando
+            return { 
+                loginFooterText: 'Copyright © 2025 Desarrollado por Erick Go\nContacto: erickgoapp@gmail.com' 
+            };
         }
-        return { loginFooterText: '' };
     }, []);
 
+    // ============================================================
+    // FUNCIÓN FALTANTE QUE CAUSA TU ERROR
+    // ============================================================
     const updateGlobalConfig = useCallback(async (configData) => {
         const configRef = doc(db, 'configuracion', 'global');
         await setDoc(configRef, configData, { merge: true });
     }, []);
+    // ============================================================
 
     // ====================================================================
     // CORRECCIÓN: NUEVAS FUNCIONES PARA GESTIÓN DE CIERRE INDIVIDUAL POR CONDUCTOR
@@ -799,7 +854,18 @@ export const useFirestore = () => {
             return defaultConfig;
         } catch (error) {
             console.error(">>> [ERROR] Error al obtener configuración semanal de cierre:", error);
-            return null;
+            // CORRECCIÓN CRÍTICA: Devolver configuración por defecto en caso de error (permisos, red, etc.)
+            // para evitar que el estado sea null y crashee la UI.
+            return {
+                lunes: { vinculoId: null, userId: null, userName: null },
+                martes: { vinculoId: null, userId: null, userName: null },
+                miercoles: { vinculoId: null, userId: null, userName: null },
+                jueves: { vinculoId: null, userId: null, userName: null },
+                viernes: { vinculoId: null, userId: null, userName: null },
+                sabado: { vinculoId: null, userId: null, userName: null },
+                domingo: { vinculoId: null, userId: null, userName: null },
+                ultimaActualizacion: Timestamp.now()
+            };
         }
     }, []);
 
@@ -1316,7 +1382,7 @@ export const useFirestore = () => {
         deleteUsersByRole,
         createTestData,
         fetchGlobalConfig,
-        updateGlobalConfig,
+        updateGlobalConfig, // AQUÍ ESTÁ LA FUNCIÓN FALTANTE
         // Funciones para gestión de cierre
         setClosingTime,
         getTodayClosingTime,
@@ -1359,9 +1425,12 @@ export const useFirestore = () => {
         updateWeeklyClosingConfig,
         getTodayClosingPersonFromWeeklyConfig,
         convertTo12HourFormat,
-        convertTo24HourFormat
+        convertTo24HourFormat,
+        // ====================================================================
+        // NUEVA FUNCIÓN DE BORRADO
+        // ====================================================================
+        deleteUserPermanently
     };
 };
 
-// CORRECCIÓN: Removed function call () from the export to fix "Invalid hook call" error
 export default useFirestore;
