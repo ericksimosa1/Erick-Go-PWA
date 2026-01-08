@@ -24,7 +24,7 @@ if (!admin.apps.length) {
             credential: admin.credential.cert(serviceAccount),
             databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
         });
-        console.log('>>> [SUCCESS] Firebase Admin inicializado (Clave Unificada).');
+        console.log('>>> [SUCCESS] Firebase Admin inicializado en get-notification-config (Clave Unificada).');
     } catch (error) {
         console.error('>>> [ERROR] Error al inicializar Firebase Admin:', error);
         throw new Error("Configuración faltante");
@@ -32,7 +32,7 @@ if (!admin.apps.length) {
 }
 
 // ====================================================================
-// CONFIGURACIONES POR DEFECTO ESPECÍFICAS
+// CONFIGURACIONES POR DEFECTO ESPECÍFICAS (OBJETOS 12H)
 // ====================================================================
 const DEFAULT_CONFIGS = {
   'irjKu853x42zZc1hcRW6': { // Croii Soledad

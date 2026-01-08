@@ -45,63 +45,21 @@ if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
 // ====================================================================
 // FUNCIONES AUXILIARES
 // ====================================================================
-
-// Función para obtener suscripciones de usuarios desde Firestore
-async function getUserSubscriptions(userIds, clientId = null) {
-  try {
-    const db = admin.firestore();
-    const subscriptions = [];
-    
-    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
-      console.log('getUserSubscriptions: La lista de userIds es inválida o está vacía.');
-      return [];
+function chunkArray(array, chunkSize) {
+    const results = [];
+    // Copiamos el array para no mutar el original con splice
+    const copy = [...array];
+    while (copy.length) {
+        results.push(copy.splice(0, chunkSize));
     }
-
-    let query = db.collection('suscripciones');
-    
-    if (clientId) {
-      query = query.where('clientId', '==', clientId);
-      const snapshot = await query.get();
-      
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        if (userIds.includes(data.userId)) {
-          subscriptions.push({
-            userId: data.userId,
-            subscription: data.subscription
-          });
-        }
-      });
-    } else {
-      // Si no tenemos clientId, filtramos directamente por userIds
-      const subscriptionPromises = userIds.map(async (userId) => {
-        const doc = await db.collection('suscripciones').doc(userId).get();
-        if (doc.exists) {
-          return {
-            userId: userId,
-            subscription: doc.data().subscription
-          };
-        }
-        return null;
-      });
-
-      const results = await Promise.all(subscriptionPromises);
-      subscriptions.push(...results.filter(sub => sub !== null));
-    }
-
-    return subscriptions;
-
-  } catch (error) {
-    console.error('Error al obtener suscripciones:', error);
-    return [];
-  }
+    return results;
 }
 
 // ====================================================================
 // HANDLER DE LA FUNCIÓN
 // ====================================================================
 exports.handler = async function (event, context) {
-  console.log('=== INICIO send-notification (versión mejorada) ===');
+  console.log('=== INICIO send-notification (Versión Multi-Empresa vía Vínculos) ===');
   
   if (event.httpMethod !== 'POST') {
     return {
@@ -116,9 +74,9 @@ exports.handler = async function (event, context) {
 
     const { userIds, userId, subscription, payload, clientId } = requestBody;
 
-    // --- CASO 1: Notificación manual desde el panel de admin ---
+    // --- CASO 1: Notificación manual o masiva ---
     if (payload && (userIds || userId)) {
-      console.log('Detectado envío manual a usuarios.');
+      console.log('Detectado envío masivo. Target ClientID:', clientId);
       let targetUserIds = Array.isArray(userIds) ? userIds : (userId ? [userId] : []);
       
       if (targetUserIds.length === 0) {
@@ -128,20 +86,115 @@ exports.handler = async function (event, context) {
         };
       }
 
-      // Obtenemos las suscripciones
-      const subscriptions = await getUserSubscriptions(targetUserIds, clientId);
+      const db = admin.firestore();
+      let subscriptions = [];
+
+      // 1. OBTENER USUARIOS Y SEPARAR ROLES
+      // Usamos chunks para no romper el límite de 10 en queries
+      const adminIds = [];
+      const otherIds = []; // Conductores y Empleados
       
+      const userIdChunks = chunkArray([...targetUserIds], 10);
+      console.log(`Verificando roles de ${targetUserIds.length} usuarios...`);
+
+      for (const chunk of userIdChunks) {
+        try {
+            const usersSnapshot = await db.collection('usuarios')
+                .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+                .get();
+
+            usersSnapshot.forEach(doc => {
+                const userData = doc.data();
+                if (userData.rol === 'administrador') {
+                    adminIds.push(doc.id);
+                } else {
+                    otherIds.push(doc.id);
+                }
+            });
+        } catch (err) {
+            console.error(`Error verificando roles en chunk:`, err);
+        }
+      }
+
+      console.log(`Roles identificados: ${adminIds.length} Admins, ${otherIds.length} Conductores/Empleados.`);
+
+      // 2. PROCESAR ADMINISTRADORES (Bypass Total)
+      if (adminIds.length > 0) {
+            console.log('Buscando suscripciones de administradores (sin filtro de empresa)...');
+            const adminSubPromises = adminIds.map(uid => db.collection('suscripciones').doc(uid).get());
+            const adminSubDocs = await Promise.all(adminSubPromises);
+            
+            adminSubDocs.forEach(doc => {
+                if (doc.exists) {
+                    subscriptions.push({
+                        userId: doc.id,
+                        subscription: doc.data().subscription
+                    });
+                }
+            });
+      }
+
+      // 3. PROCESAR CONDUCTORES Y EMPLEADOS (Validación por Vínculos)
+      if (otherIds.length > 0 && clientId) {
+            console.log('Verificando vínculos activos para la empresa:', clientId);
+            
+            // Buscamos TODOS los vínculos de esa empresa (incluso si son 100 usuarios)
+            const vinculosSnapshot = await db.collection('vinculos')
+                .where('clientId', '==', clientId)
+                .where('activo', '!=', false) // Trae solo activos (true o null)
+                .get();
+
+            console.log(`Se encontraron ${vinculosSnapshot.size} vínculos activos en la empresa.`);
+
+            // Filtramos en memoria para encontrar coincidencias con nuestra lista de objetivos
+            const validUserIds = new Set();
+            
+            vinculosSnapshot.forEach(doc => {
+                const data = doc.data();
+                // Si este usuario está en nuestra lista de objetivos (otherIds)
+                if (otherIds.includes(data.userId)) {
+                    validUserIds.add(data.userId);
+                }
+            });
+
+            const usersToNotify = Array.from(validUserIds);
+            console.log(`Usuarios válidos encontrados dentro de la empresa: ${usersToNotify.length}`);
+
+            if (usersToNotify.length > 0) {
+                // AHORA sí buscamos suscripciones.
+                // IMPORTANTE: No filtramos por clientId aquí. Si tienen vínculo válido, tienen derecho a recibir.
+                // Esto soluciona el problema de usuarios con múltiples empresas.
+                
+                const validUserChunks = chunkArray(usersToNotify, 10);
+                
+                for (const chunk of validUserChunks) {
+                    const subSnapshot = await db.collection('suscripciones')
+                        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+                        .get();
+
+                    subSnapshot.forEach(doc => {
+                        if (doc.exists) {
+                            subscriptions.push({
+                                userId: doc.id,
+                                subscription: doc.data().subscription
+                            });
+                        }
+                    });
+                }
+            }
+      }
+
+      // 4. ENVIAR NOTIFICACIONES
       if (subscriptions.length === 0) {
-        console.log('No se encontraron suscripciones para los usuarios seleccionados.');
+        console.log('No se encontraron suscripciones coincidentes.');
         return {
           statusCode: 200,
           body: JSON.stringify({ message: 'No hay suscripciones para notificar' })
         };
       }
 
-      console.log(`Enviando notificación a ${subscriptions.length} suscripciones encontradas.`);
+      console.log(`Enviando notificación a ${subscriptions.length} suscripciones.`);
       
-      // Procesamos las notificaciones en lotes para evitar sobrecarga
       const batchSize = 10;
       const results = [];
       
@@ -156,20 +209,15 @@ exports.handler = async function (event, context) {
               };
               
               await webPush.sendNotification(subscription, JSON.stringify(payloadWithTimestamp));
-              console.log(`✅ Notificación enviada con éxito al usuario: ${userId}`);
+              console.log(`✅ Notificación enviada a: ${userId}`);
               return { userId, success: true };
             } catch (error) {
-              console.error(`❌ Error al enviar notificación al usuario ${userId}:`, error.message);
+              console.error(`❌ Error enviando a ${userId}:`, error.message);
               
-              // Si el error es 410 (Gone), significa que la suscripción ya no es válida
               if (error.statusCode === 410) {
-                console.log(`Eliminando suscripción inválida para el usuario: ${userId}`);
                 try {
-                  const db = admin.firestore();
                   await db.collection('suscripciones').doc(userId).delete();
-                } catch (deleteError) {
-                  console.error(`Error al eliminar suscripción inválida: ${deleteError.message}`);
-                }
+                } catch (deleteError) {}
               }
               
               return { userId, success: false, error: error.message };
@@ -178,8 +226,6 @@ exports.handler = async function (event, context) {
         );
         
         results.push(...batchResults);
-        
-        // Pequeña pausa entre lotes
         if (i + batchSize < subscriptions.length) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
@@ -188,7 +234,7 @@ exports.handler = async function (event, context) {
       return {
         statusCode: 200,
         body: JSON.stringify({ 
-          message: 'Proceso de notificación manual completado.',
+          message: 'Proceso completado.',
           results: results
         }),
       };
@@ -218,13 +264,13 @@ exports.handler = async function (event, context) {
       }
     } 
     
-    // --- CASO 3: Error, el formato de la petición es incorrecto ---
+    // --- CASO 3: Error ---
     else {
       console.error('Error: El formato de la petición no es válido.');
       return {
         statusCode: 400,
         body: JSON.stringify({ 
-          error: 'Formato de petición inválido. Se requiere {userIds: [...], payload: {...}} o {subscription: {...}, payload: {...}}.' 
+          error: 'Formato de petición inválido.' 
         }),
       };
     }

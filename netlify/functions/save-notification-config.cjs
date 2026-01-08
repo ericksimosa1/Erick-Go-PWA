@@ -24,7 +24,7 @@ if (!admin.apps.length) {
             credential: admin.credential.cert(serviceAccount),
             databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
         });
-        console.log('>>> [SUCCESS] Firebase Admin inicializado (Clave Unificada).');
+        console.log('>>> [SUCCESS] Firebase Admin inicializado en save-notification-config (Clave Unificada).');
     } catch (error) {
         console.error('>>> [ERROR] Error al inicializar Firebase Admin:', error);
         throw new Error("Configuración faltante");
