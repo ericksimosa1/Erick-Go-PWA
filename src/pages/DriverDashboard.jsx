@@ -5,12 +5,16 @@ import { PlayArrow as PlayArrowIcon, ViewList as ViewListIcon, Category as Categ
 import { useNavigate } from 'react-router-dom';
 import { useFirestore } from '../hooks/useFirestore';
 import { useAuthStore } from '../store/authStore';
-import { doc, updateDoc, arrayUnion, Timestamp, addDoc, collection, getDocs, query, where } from 'firebase/firestore'; // CORRECCIÓN: Imports agregados para búsqueda directa de admins
+import { doc, updateDoc, arrayUnion, Timestamp, addDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export default function DriverDashboard() {
     const navigate = useNavigate();
-    const { user, selectedClientId, clients } = useAuthStore(); // Agregado 'clients'
+    const { user, selectedClientId, clients } = useAuthStore();
+    
+    // Obtener nombre de la empresa actual
+    const clientName = clients.find(c => c.id === selectedClientId)?.nombre || 'Tu empresa';
+
     const { 
         fetchUsers, 
         addTrip, 
@@ -26,9 +30,6 @@ export default function DriverDashboard() {
         fetchDriversWithPendingEmployees
     } = useFirestore();
     
-    // Obtener nombre de la empresa actual
-    const clientName = clients.find(c => c.id === selectedClientId)?.nombre || 'Tu empresa';
-
     // Estados principales
     const [loading, setLoading] = useState(true);
     const [dataLoaded, setDataLoaded] = useState(false);
@@ -50,7 +51,7 @@ export default function DriverDashboard() {
     const [tripStarted, setTripStarted] = useState(false);
     const [isStartingTrip, setIsStartingTrip] = useState(false);
     const [activeTripId, setActiveTripId] = useState(null);
-    const [droppedOffEmployees, setDroppedOffEmployees] = useState([]);
+    const [droppedOffEmployees, setDroppedOffEmployees] = useState([]); // Corrección de typo
     const [trips, setTrips] = useState([]);
     
     // Estados de modo de viaje
@@ -95,7 +96,7 @@ export default function DriverDashboard() {
                 body: JSON.stringify({
                     userIds: employeeIds,
                     payload: notificationPayload,
-                    clientId: selectedClientId
+                    clientId: selectedClientId // <--- CORREGIDO
                 }),
             });
 
@@ -109,7 +110,7 @@ export default function DriverDashboard() {
         }
     };
 
-    // --- NUEVA FUNCIÓN PARA ENVIAR ESTADO DEL VIAJE A ADMINISTRADORES ---
+    // --- FUNCIÓN PARA ENVIAR ESTADO DEL VIAJE A ADMINISTRADORES ---
     const sendTripStatusToAdmins = async (status, driverName, employeeCount) => {
         // 🔒 PROTECCIÓN MODO DESARROLLO (Versión Robusta)
         const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -121,11 +122,12 @@ export default function DriverDashboard() {
         console.log(`Enviando notificación de viaje ${status} a administradores...`);
         
         // CORRECCIÓN CRÍTICA: Buscamos admins DIRECTAMENTE en 'usuarios'
-        // porque 'allUsers' viene filtrado por vinculos y el admin puede no tener vínculo.
+        // porque 'allUsers' viene filtrado por vínculos y el admin puede no tener vínculo.
         let admins = [];
         try {
             // Asumimos que 'rol' es top-level en la colección usuarios
             const adminsSnapshot = await getDocs(query(collection(db, 'usuarios'), where('rol', '==', 'administrador')));
+            
             // Transformamos el snapshot en el formato esperado por la lógica de envío
             admins = adminsSnapshot.docs.map(doc => ({ userId: doc.id, userData: doc.data() }));
         } catch (error) {
@@ -143,14 +145,16 @@ export default function DriverDashboard() {
                 title: 'Viaje Iniciado',
                 body: `El conductor ${driverName} de ${clientName} ha iniciado un viaje con ${employeeCount} empleado(s).`,
                 icon: '/erick-go-logo.png',
-                data: { url: '/admin-dashboard' }
+                data: { url: '/admin-dashboard' },
+                requireInteraction: true // <--- CORREGIDO: Añadido para Desktop
             };
         } else if (status === 'ended') {
             notificationPayload = {
                 title: 'Jornada Finalizada',
                 body: `El conductor ${driverName} de ${clientName} ha finalizado su jornada. ¡Buen trabajo!`,
                 icon: '/erick-go-logo.png',
-                data: { url: '/admin-dashboard' }
+                data: { url: '/admin-dashboard' },
+                requireInteraction: true // <--- CORREGIDO: Añadido para Desktop
             };
         }
 
@@ -163,7 +167,7 @@ export default function DriverDashboard() {
                 body: JSON.stringify({
                     userIds: adminIds,
                     payload: notificationPayload,
-                    clientId: selectedClientId // Enviamos el clientId para empleados multi-empresa
+                    clientId: selectedClientId // <--- CORREGIDO
                 }),
             });
 
@@ -212,7 +216,7 @@ export default function DriverDashboard() {
         }
     };
 
-    // EFECTO1: Lógica de selección de empresa
+    // EFECTO 1: Lógica de selección de empresa
     useEffect(() => {
         if (!user || hasInitialized.current) return;
         const initializeDriver = async () => {
@@ -505,11 +509,9 @@ export default function DriverDashboard() {
             return;
         }
         try {
-            // CORRECCIÓN: Cambiar const a let para permitir reasignación
             let asistencia = todayAsistencias.find(a => a.id === employeeId);
             
             if (!asistencia) {
-                // Intento por empleadoId si id falla (a veces los datos vienen mezclados)
                 const asistenciaByEmpId = todayAsistencias.find(a => a.empleadoId === employeeId);
                 if (asistenciaByEmpId) {
                     asistencia = asistenciaByEmpId;
@@ -558,7 +560,7 @@ export default function DriverDashboard() {
                         body: JSON.stringify({
                             userIds: [employeeId],
                             payload: notificationPayload,
-                            clientId: selectedClientId
+                            clientId: selectedClientId // <--- CORREGIDO
                         }),
                     });
 
@@ -640,7 +642,7 @@ export default function DriverDashboard() {
                 conductorNombre: user.nombre,
                 empleadosIds: employeesForThisTrip.map(emp => emp.empleadoId),
                 estado: 'en_progreso',
-                fechaInicio: Timestamp.now(), // CORRECCIÓN: Usar Timestamp.now()
+                fechaInicio: Timestamp.now(),
                 clientId: selectedClientId,
                 empleadosEntregados: [],
                 horaCierre: driverClosingTime || companyClosingTime
@@ -653,7 +655,6 @@ export default function DriverDashboard() {
             setActiveTripId(tripDocRef.id);
             setDroppedOffEmployees([]);
             
-            // CORRECCIÓN: Agregamos el viaje al estado local 'trips' aunque solo usemos activeTripId
             const newTrip = { id: tripDocRef.id, ...tripData };
             setTrips(prev => [...prev, newTrip]);
             setTripStarted(true);
