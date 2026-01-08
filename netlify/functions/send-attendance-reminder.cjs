@@ -1,4 +1,4 @@
-// netlify/functions/send-attendance-reminder.cjs (CORREGIDO Y OPTIMIZADO)
+// netlify/functions/send-attendance-reminder.cjs
 const webPush = require('web-push');
 const admin = require('firebase-admin');
 
@@ -37,11 +37,12 @@ const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
 
 if (vapidPublicKey && vapidPrivateKey) {
-    webPush.setVapidDetails({
-        subject: 'mailto:erickgoapp@gmail.com',
-        publicKey: vapidPublicKey,
-        privateKey: vapidPrivateKey
-    });
+    // --- CORRECCIÓN 1: Pasamos argumentos separados para evitar el error [object Object] ---
+    webPush.setVapidDetails(
+        'mailto:erickgoapp@gmail.com', // Subject (String)
+        vapidPublicKey,                // PublicKey (String)
+        vapidPrivateKey                 // PrivateKey (String)
+    );
 } else {
     console.warn(">>> [WARN] Claves VAPID no encontradas.");
 }
@@ -150,15 +151,13 @@ exports.handler = async function (event, context) {
             // -----------------------------------------------------
 
             // --- FIX 2: CARGA MASIVA DE SUSCRIPCIONES (OPTIMIZACIÓN) ---
-            // Cargamos todas las suscripciones de la empresa en un Map para evitar consultas dobles
             const suscripcionesSnapshot = await db.collection('suscripciones')
                 .where('clientId', '==', clientId)
                 .get();
 
-            const suscripcionesMap = new Map(); // Mapa: userId -> { subscription, dailyOptOut, dailyOptOutDate }
+            const suscripcionesMap = new Map();
             const optedOutUserIds = new Set();
 
-            // Fecha hoy a medianoche para comparar
             const today = new Date();
             today.setHours(0,0,0,0);
 
@@ -166,7 +165,6 @@ exports.handler = async function (event, context) {
                 const data = doc.data();
                 const uid = doc.id;
                 
-                // Verificar Opt-Out en memoria
                 if (data.dailyOptOut === true) {
                     const optOutDate = data.dailyOptOutDate ? data.dailyOptOutDate.toDate() : null;
                     if (optOutDate) {
@@ -178,14 +176,11 @@ exports.handler = async function (event, context) {
                     }
                 }
                 
-                // Guardar la suscripción en el mapa
                 if (data.subscription && data.subscription.endpoint) {
                     suscripcionesMap.set(uid, data.subscription);
                 }
             });
-            // -----------------------------------------------------
 
-            // Filtrar empleados válidos (que no marcaron opt-out)
             const targetEmployees = employeeIds.filter(id => !optedOutUserIds.has(id));
             
             if (targetEmployees.length === 0) continue;
@@ -204,21 +199,20 @@ exports.handler = async function (event, context) {
                 data: { url: '/login', type: 'attendance_reminder' }
             };
 
-            // Necesitamos los nombres, los buscamos en lote
-            // Nota: Firestore 'in' soporta hasta 10 items. Si hay >10 empleados, deberíamos usar chunks.
-            // Para simplificar este ejemplo, usaremos chunks básicos.
             let sentCount = 0;
             const employeeChunks = [];
             const copyIds = [...targetEmployees];
+            // Dividimos en chunks de 10 para la consulta 'in' de Firestore
             while(copyIds.length) employeeChunks.push(copyIds.splice(0, 10));
 
+            // --- CORRECCIÓN 2: ENVIAR CON AWAIT PARA GARANTIZAR LLEGADA ---
             for (const chunk of employeeChunks) {
-                // Obtener usuarios del chunk
                 const usersSnap = await db.collection('usuarios')
                     .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
                     .get();
                 
-                usersSnap.forEach(doc => {
+                // Usamos for...of en lugar de forEach para poder usar await dentro del bucle
+                for (const doc of usersSnap.docs) {
                     const userId = doc.id;
                     const userName = doc.data().nombre || 'Empleado';
                     const subscription = suscripcionesMap.get(userId);
@@ -230,16 +224,22 @@ exports.handler = async function (event, context) {
                             data: { ...payloadBase.data, userId: userId, clientId: clientId, userName: userName }
                         };
 
-                        webPush.sendNotification(subscription, JSON.stringify(personalizedPayload))
-                            .then(() => sentCount++)
-                            .catch((error) => {
-                                if (error.statusCode === 410) {
-                                    db.collection('suscripciones').doc(userId).delete();
-                                }
-                            });
+                        try {
+                            // Esperamos a que se envíe la notificación antes de continuar
+                            await webPush.sendNotification(subscription, JSON.stringify(personalizedPayload));
+                            sentCount++;
+                            console.log(`[OK] Notificación enviada a ${userName} (${userId})`);
+                        } catch (error) {
+                            console.error(`[ERROR] Falló envío a ${userId}:`, error.message);
+                            // Si la suscripción ya no es válida (410), la borramos
+                            if (error.statusCode === 410) {
+                                await db.collection('suscripciones').doc(userId).delete();
+                            }
+                        }
                     }
-                });
+                }
             }
+            // ----------------------------------------------------------------
             
             results.push({ clientId, clientName, recipients: targetEmployees.length, sentCount: sentCount });
         }
