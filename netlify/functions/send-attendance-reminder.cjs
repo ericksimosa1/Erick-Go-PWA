@@ -37,11 +37,10 @@ const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
 
 if (vapidPublicKey && vapidPrivateKey) {
-    // --- CORRECCIÓN 1: Pasamos argumentos separados para evitar el error [object Object] ---
     webPush.setVapidDetails(
-        'mailto:erickgoapp@gmail.com', // Subject (String)
-        vapidPublicKey,                // PublicKey (String)
-        vapidPrivateKey                 // PrivateKey (String)
+        'mailto:erickgoapp@gmail.com',
+        vapidPublicKey,
+        vapidPrivateKey
     );
 } else {
     console.warn(">>> [WARN] Claves VAPID no encontradas.");
@@ -104,37 +103,35 @@ exports.handler = async function (event, context) {
                 continue;
             }
 
-            // Manejo de hora
-            let reminderTime24h;
-            if (typeof config.attendanceReminderTime === 'object' && config.attendanceReminderTime.time) {
-                const { time, ampm } = config.attendanceReminderTime;
-                const [hours, minutes] = time.split(':');
-                let hoursNum = parseInt(hours, 10);
-                if (ampm === 'PM' && hoursNum < 12) hoursNum += 12;
-                if (ampm === 'AM' && hoursNum === 12) hoursNum = 0;
-                reminderTime24h = `${hoursNum.toString().padStart(2,'0')}:${minutes}`;
-            } else {
-                reminderTime24h = config.attendanceReminderTime;
-            }
+            // --- NUEVA LÓGICA DE TIEMPO (START TIME - END TIME) ---
+            // Leemos los nuevos campos que tienes en Firebase
+            const startTimeStr = config.attendanceReminderStartTime || "09:00";
+            const endTimeStr = config.attendanceReminderEndTime || "18:00";
 
+            // Convertimos "HH:MM" a minutos totales (ej. 13:00 -> 13*60 = 780)
+            const [startH, startM] = startTimeStr.split(':').map(Number);
+            const [endH, endM] = endTimeStr.split(':').map(Number);
+            const startMinutes = startH * 60 + startM;
+            const endMinutes = endH * 60 + endM;
+
+            // Calculamos la hora actual en Venezuela
             const now = new Date();
-            const targetHour = parseInt(reminderTime24h.split(':')[0], 10);
-            const targetMinute = parseInt(reminderTime24h.split(':')[1], 10);
-            
-            // Zona horaria Venezuela (-4 horas)
             const nowHour = (now.getHours() - 4 + 24) % 24; 
             const nowMinute = now.getMinutes();
+            const currentTotalMinutes = nowHour * 60 + nowMinute;
+
+            console.log(`[DEBUG] Cliente: ${clientName}. Hora VZLA: ${nowHour}:${nowMinute}. Rango: ${startTimeStr} - ${endTimeStr}`);
+
+            // Verificamos si estamos dentro de la ventana de tiempo
+            const isWithinWindow = (currentTotalMinutes >= startMinutes && currentTotalMinutes <= endMinutes);
             
-            // Ventana de 30 minutos
-            const isExactTime = (nowHour === targetHour && nowMinute >= targetMinute && nowMinute <= targetMinute + 15);
-            const isExactTime15 = (nowHour === targetHour && nowMinute >= targetMinute + 16 && nowMinute <= targetMinute + 30);
-            
-            if (!isExactTime && !isExactTime15) {
+            if (!isWithinWindow) {
+                console.log(`[DEBUG] Fuera de horario. Se salta este cliente.`);
                 continue;
             }
+            // -----------------------------------------------------
 
-            // --- FIX 1: CONSULTA DE VINCULOS (SIN ÍNDICE COMPUESTO) ---
-            // Traemos todos los vínculos de la empresa y filtramos en memoria
+            // --- FIX 1: CONSULTA DE VINCULOS ---
             const vinculosSnapshot = await db.collection('vinculos')
                 .where('clientId', '==', clientId)
                 .get();
@@ -148,9 +145,8 @@ exports.handler = async function (event, context) {
             });
 
             if (employeeIds.length === 0) continue;
-            // -----------------------------------------------------
 
-            // --- FIX 2: CARGA MASIVA DE SUSCRIPCIONES (OPTIMIZACIÓN) ---
+            // --- FIX 2: CARGA MASIVA DE SUSCRIPCIONES ---
             const suscripcionesSnapshot = await db.collection('suscripciones')
                 .where('clientId', '==', clientId)
                 .get();
@@ -202,16 +198,14 @@ exports.handler = async function (event, context) {
             let sentCount = 0;
             const employeeChunks = [];
             const copyIds = [...targetEmployees];
-            // Dividimos en chunks de 10 para la consulta 'in' de Firestore
             while(copyIds.length) employeeChunks.push(copyIds.splice(0, 10));
 
-            // --- CORRECCIÓN 2: ENVIAR CON AWAIT PARA GARANTIZAR LLEGADA ---
+            // --- ENVÍO DE NOTIFICACIONES ---
             for (const chunk of employeeChunks) {
                 const usersSnap = await db.collection('usuarios')
                     .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
                     .get();
                 
-                // Usamos for...of en lugar de forEach para poder usar await dentro del bucle
                 for (const doc of usersSnap.docs) {
                     const userId = doc.id;
                     const userName = doc.data().nombre || 'Empleado';
@@ -225,13 +219,11 @@ exports.handler = async function (event, context) {
                         };
 
                         try {
-                            // Esperamos a que se envíe la notificación antes de continuar
                             await webPush.sendNotification(subscription, JSON.stringify(personalizedPayload));
                             sentCount++;
-                            console.log(`[OK] Notificación enviada a ${userName} (${userId})`);
+                            console.log(`[OK] Notificación enviada a ${userName}`);
                         } catch (error) {
                             console.error(`[ERROR] Falló envío a ${userId}:`, error.message);
-                            // Si la suscripción ya no es válida (410), la borramos
                             if (error.statusCode === 410) {
                                 await db.collection('suscripciones').doc(userId).delete();
                             }
@@ -239,7 +231,6 @@ exports.handler = async function (event, context) {
                     }
                 }
             }
-            // ----------------------------------------------------------------
             
             results.push({ clientId, clientName, recipients: targetEmployees.length, sentCount: sentCount });
         }
