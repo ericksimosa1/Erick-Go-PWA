@@ -103,18 +103,15 @@ exports.handler = async function (event, context) {
                 continue;
             }
 
-            // --- NUEVA LÓGICA DE TIEMPO (START TIME - END TIME) ---
-            // Leemos los nuevos campos que tienes en Firebase
+            // --- LÓGICA DE TIEMPO ---
             const startTimeStr = config.attendanceReminderStartTime || "09:00";
             const endTimeStr = config.attendanceReminderEndTime || "18:00";
 
-            // Convertimos "HH:MM" a minutos totales (ej. 13:00 -> 13*60 = 780)
             const [startH, startM] = startTimeStr.split(':').map(Number);
             const [endH, endM] = endTimeStr.split(':').map(Number);
             const startMinutes = startH * 60 + startM;
             const endMinutes = endH * 60 + endM;
 
-            // Calculamos la hora actual en Venezuela
             const now = new Date();
             const nowHour = (now.getHours() - 4 + 24) % 24; 
             const nowMinute = now.getMinutes();
@@ -122,7 +119,6 @@ exports.handler = async function (event, context) {
 
             console.log(`[DEBUG] Cliente: ${clientName}. Hora VZLA: ${nowHour}:${nowMinute}. Rango: ${startTimeStr} - ${endTimeStr}`);
 
-            // Verificamos si estamos dentro de la ventana de tiempo
             const isWithinWindow = (currentTotalMinutes >= startMinutes && currentTotalMinutes <= endMinutes);
             
             if (!isWithinWindow) {
@@ -131,7 +127,7 @@ exports.handler = async function (event, context) {
             }
             // -----------------------------------------------------
 
-            // --- FIX 1: CONSULTA DE VINCULOS ---
+            // --- 1. CONSULTA DE VINCULOS (EMPLEADOS) ---
             const vinculosSnapshot = await db.collection('vinculos')
                 .where('clientId', '==', clientId)
                 .get();
@@ -144,18 +140,36 @@ exports.handler = async function (event, context) {
                 }
             });
 
-            if (employeeIds.length === 0) continue;
+            if (employeeIds.length === 0) {
+                console.log(`[DEBUG] No hay empleados activos para ${clientName}.`);
+                continue;
+            }
 
-            // --- FIX 2: CARGA MASIVA DE SUSCRIPCIONES ---
+            // --- 2. CARGA DE ASISTENCIAS DE HOY (NUEVO) ---
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+
+            const asistenciasSnapshot = await db.collection('asistencias')
+                .where('clientId', '==', clientId)
+                .where('fecha', '>=', admin.firestore.Timestamp.fromDate(today))
+                .where('fecha', '<', admin.firestore.Timestamp.fromDate(tomorrow))
+                .get();
+
+            const attendanceMap = new Map();
+            asistenciasSnapshot.forEach(doc => {
+                attendanceMap.set(doc.data().empleadoId, true);
+            });
+            // -----------------------------------------------------
+
+            // --- 3. CARGA DE SUSCRIPCIONES ---
             const suscripcionesSnapshot = await db.collection('suscripciones')
                 .where('clientId', '==', clientId)
                 .get();
 
             const suscripcionesMap = new Map();
             const optedOutUserIds = new Set();
-
-            const today = new Date();
-            today.setHours(0,0,0,0);
 
             suscripcionesSnapshot.forEach(doc => {
                 const data = doc.data();
@@ -177,9 +191,10 @@ exports.handler = async function (event, context) {
                 }
             });
 
-            const targetEmployees = employeeIds.filter(id => !optedOutUserIds.has(id));
+            // Filtramos empleados preliminares
+            const potentialEmployees = employeeIds; // Mantenemos todos para validar individualmente abajo
             
-            if (targetEmployees.length === 0) continue;
+            if (potentialEmployees.length === 0) continue;
             
             const payloadBase = {
                 title: 'Recordatorio de Asistencia',
@@ -196,11 +211,12 @@ exports.handler = async function (event, context) {
             };
 
             let sentCount = 0;
+            let skippedCount = 0;
             const employeeChunks = [];
-            const copyIds = [...targetEmployees];
+            const copyIds = [...potentialEmployees];
             while(copyIds.length) employeeChunks.push(copyIds.splice(0, 10));
 
-            // --- ENVÍO DE NOTIFICACIONES ---
+            // --- PROCESAMIENTO Y ENVIÓ ---
             for (const chunk of employeeChunks) {
                 const usersSnap = await db.collection('usuarios')
                     .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
@@ -209,30 +225,50 @@ exports.handler = async function (event, context) {
                 for (const doc of usersSnap.docs) {
                     const userId = doc.id;
                     const userName = doc.data().nombre || 'Empleado';
+
+                    // 1. Verificar Opt-Out (No usar transporte hoy)
+                    if (optedOutUserIds.has(userId)) {
+                        console.log(`[SKIP] ${userName}: Marcó "No usar transporte" hoy.`);
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // 2. Verificar Asistencia Ya Registrada
+                    if (attendanceMap.has(userId)) {
+                        console.log(`[SKIP] ${userName}: Ya registró asistencia hoy.`);
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // 3. Verificar Suscripción Activa
+                    if (!suscripcionesMap.has(userId)) {
+                        console.log(`[SKIP] ${userName}: No tiene suscripción activa.`);
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // Si pasa todos los filtros, enviar notificación
                     const subscription = suscripcionesMap.get(userId);
+                    const personalizedPayload = {
+                        ...payloadBase,
+                        body: `${userName}, ${payloadBase.body}`,
+                        data: { ...payloadBase.data, userId: userId, clientId: clientId, userName: userName }
+                    };
 
-                    if (subscription) {
-                        const personalizedPayload = {
-                            ...payloadBase,
-                            body: `${userName}, ${payloadBase.body}`,
-                            data: { ...payloadBase.data, userId: userId, clientId: clientId, userName: userName }
-                        };
-
-                        try {
-                            await webPush.sendNotification(subscription, JSON.stringify(personalizedPayload));
-                            sentCount++;
-                            console.log(`[OK] Notificación enviada a ${userName}`);
-                        } catch (error) {
-                            console.error(`[ERROR] Falló envío a ${userId}:`, error.message);
-                            if (error.statusCode === 410) {
-                                await db.collection('suscripciones').doc(userId).delete();
-                            }
+                    try {
+                        await webPush.sendNotification(subscription, JSON.stringify(personalizedPayload));
+                        sentCount++;
+                        console.log(`[OK] Notificación enviada a ${userName}`);
+                    } catch (error) {
+                        console.error(`[ERROR] Falló envío a ${userName}:`, error.message);
+                        if (error.statusCode === 410) {
+                            await db.collection('suscripciones').doc(userId).delete();
                         }
                     }
                 }
             }
             
-            results.push({ clientId, clientName, recipients: targetEmployees.length, sentCount: sentCount });
+            results.push({ clientId, clientName, recipients: potentialEmployees.length, sentCount: sentCount, skippedCount: skippedCount });
         }
         
         return {
