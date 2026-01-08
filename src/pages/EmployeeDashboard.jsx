@@ -8,7 +8,7 @@ import { useAuthStore } from '../store/authStore';
 
 export default function EmployeeDashboard() {
     const navigate = useNavigate();
-    const { user, selectedClientId } = useAuthStore();
+    const { user, selectedClientId, clients } = useAuthStore(); // <--- AÑADIDO: clients
     const { 
         fetchUserVinculos, 
         fetchZones, 
@@ -21,8 +21,11 @@ export default function EmployeeDashboard() {
         clearAllClosingTimesForToday,
         fetchDriversByZone,
         hasDriverClosingRecordToday,
-        getTodayClosingPersonFromWeeklyConfig // <--- IMPORTANTE: Agregamos esta función para consultar la "Fuente de la Verdad"
+        getTodayClosingPersonFromWeeklyConfig
     } = useFirestore();
+    
+    // Obtener nombre de la empresa actual
+    const clientName = clients.find(c => c.id === selectedClientId)?.nombre || 'Tu empresa';
     
     const [zones, setZones] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -50,7 +53,8 @@ export default function EmployeeDashboard() {
         console.log(`Enviando notificación de asistencia a conductores de la zona ${zoneName}...`);
         const notificationPayload = {
             title: 'Nuevo Registro de Asistencia',
-            body: `El empleado ${user.nombre} ha registrado su asistencia en la zona: ${zoneName}.`,
+            // CAMBIO AQUÍ
+            body: `El empleado ${user.nombre} de ${clientName} ha registrado su asistencia en la zona: ${zoneName}.`,
             icon: '/erick-go-logo.png',
             data: {
                 url: '/conductor-dashboard' 
@@ -78,6 +82,7 @@ export default function EmployeeDashboard() {
                 body: JSON.stringify({
                     userIds: validDriverIds, 
                     payload: notificationPayload,
+                    clientId: selectedClientId // <--- IMPORTANTE
                 }),
             });
 
@@ -473,7 +478,7 @@ export default function EmployeeDashboard() {
                     </List>
                 ) : (
                     <Alert severity="info" sx={{ mt: 2 }}>
-                        No hay zonas registradas para esta empresa. Contacte al administrador.
+                        No hay zonas registradas para esta empresa. Contacta al administrador.
                     </Alert>
                 )}
                 

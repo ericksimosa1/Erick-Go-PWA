@@ -5,12 +5,12 @@ import { PlayArrow as PlayArrowIcon, ViewList as ViewListIcon, Category as Categ
 import { useNavigate } from 'react-router-dom';
 import { useFirestore } from '../hooks/useFirestore';
 import { useAuthStore } from '../store/authStore';
-import { doc, updateDoc, arrayUnion, Timestamp, addDoc, collection } from 'firebase/firestore'; // CORRECCIÓN: Timestamp importado
+import { doc, updateDoc, arrayUnion, Timestamp, addDoc, collection, getDocs, query, where } from 'firebase/firestore'; // CORRECCIÓN: Imports agregados para búsqueda directa de admins
 import { db } from '../firebase';
 
 export default function DriverDashboard() {
     const navigate = useNavigate();
-    const { user, selectedClientId } = useAuthStore();
+    const { user, selectedClientId, clients } = useAuthStore(); // Agregado 'clients'
     const { 
         fetchUsers, 
         addTrip, 
@@ -26,6 +26,9 @@ export default function DriverDashboard() {
         fetchDriversWithPendingEmployees
     } = useFirestore();
     
+    // Obtener nombre de la empresa actual
+    const clientName = clients.find(c => c.id === selectedClientId)?.nombre || 'Tu empresa';
+
     // Estados principales
     const [loading, setLoading] = useState(true);
     const [dataLoaded, setDataLoaded] = useState(false);
@@ -74,7 +77,7 @@ export default function DriverDashboard() {
         
         const notificationPayload = {
             title: '¡Tu viaje ha comenzado!',
-            body: `Tu conductor, ${user.nombre}, está en camino. Prepárate para abordar.`,
+            body: `Tu conductor, ${user.nombre} de ${clientName} ya está en el punto de encuentro, Prepárate para abordar.`,
             icon: '/erick-go-logo.png',
             data: {
                 url: '/empleado-dashboard'
@@ -92,6 +95,7 @@ export default function DriverDashboard() {
                 body: JSON.stringify({
                     userIds: employeeIds,
                     payload: notificationPayload,
+                    clientId: selectedClientId
                 }),
             });
 
@@ -116,10 +120,20 @@ export default function DriverDashboard() {
 
         console.log(`Enviando notificación de viaje ${status} a administradores...`);
         
-        const admins = allUsers.filter(u => u && u.userData && u.userData.rol === 'administrador');
+        // CORRECCIÓN CRÍTICA: Buscamos admins DIRECTAMENTE en 'usuarios'
+        // porque 'allUsers' viene filtrado por vinculos y el admin puede no tener vínculo.
+        let admins = [];
+        try {
+            // Asumimos que 'rol' es top-level en la colección usuarios
+            const adminsSnapshot = await getDocs(query(collection(db, 'usuarios'), where('rol', '==', 'administrador')));
+            // Transformamos el snapshot en el formato esperado por la lógica de envío
+            admins = adminsSnapshot.docs.map(doc => ({ userId: doc.id, userData: doc.data() }));
+        } catch (error) {
+            console.error("Error al obtener administradores directos:", error);
+        }
         
         if (admins.length === 0) {
-            console.log("No hay administradores en esta empresa para notificar.");
+            console.log("No hay administradores encontrados en la base de datos para notificar.");
             return;
         }
 
@@ -127,14 +141,14 @@ export default function DriverDashboard() {
         if (status === 'started') {
             notificationPayload = {
                 title: 'Viaje Iniciado',
-                body: `El conductor ${driverName} ha iniciado un viaje con ${employeeCount} empleado(s).`,
+                body: `El conductor ${driverName} de ${clientName} ha iniciado un viaje con ${employeeCount} empleado(s).`,
                 icon: '/erick-go-logo.png',
                 data: { url: '/admin-dashboard' }
             };
         } else if (status === 'ended') {
             notificationPayload = {
                 title: 'Jornada Finalizada',
-                body: `El conductor ${driverName} ha finalizado su jornada. ¡Buen trabajo!`,
+                body: `El conductor ${driverName} de ${clientName} ha finalizado su jornada. ¡Buen trabajo!`,
                 icon: '/erick-go-logo.png',
                 data: { url: '/admin-dashboard' }
             };
@@ -149,6 +163,7 @@ export default function DriverDashboard() {
                 body: JSON.stringify({
                     userIds: adminIds,
                     payload: notificationPayload,
+                    clientId: selectedClientId // Enviamos el clientId para empleados multi-empresa
                 }),
             });
 
@@ -170,7 +185,7 @@ export default function DriverDashboard() {
         const hour = parseInt(hours, 10);
         const period = hour >= 12 ? 'PM' : 'AM';
         const hour12 = hour % 12 || 12;
-        return `${hour12.toString().padStart(2, '0')}:${minutes} ${period}`;
+        return `${hour12.toString().padStart(2,'0')}:${minutes} ${period}`;
     };
 
     // Función para formatear la fecha con día de la semana
@@ -197,7 +212,7 @@ export default function DriverDashboard() {
         }
     };
 
-    // EFECTO 1: Lógica de selección de empresa
+    // EFECTO1: Lógica de selección de empresa
     useEffect(() => {
         if (!user || hasInitialized.current) return;
         const initializeDriver = async () => {
@@ -543,6 +558,7 @@ export default function DriverDashboard() {
                         body: JSON.stringify({
                             userIds: [employeeId],
                             payload: notificationPayload,
+                            clientId: selectedClientId
                         }),
                     });
 
@@ -638,7 +654,6 @@ export default function DriverDashboard() {
             setDroppedOffEmployees([]);
             
             // CORRECCIÓN: Agregamos el viaje al estado local 'trips' aunque solo usemos activeTripId
-            // Pero para mantener compatibilidad con renderActiveTripList, lo añadimos.
             const newTrip = { id: tripDocRef.id, ...tripData };
             setTrips(prev => [...prev, newTrip]);
             setTripStarted(true);

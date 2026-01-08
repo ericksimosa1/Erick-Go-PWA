@@ -71,7 +71,7 @@ function AppContent() {
 
     // --- FUNCIÓN FINAL: FORZAR DESREGISTRACIÓN Y RECARGA (OPCIÓN NUCLEAR) ---
     const handleUpdate = async () => {
-        console.log('[APP] Botón ACTUALIZAR presionado. Iniciando procedimiento nuclear v13...');
+        console.log('[APP] Botón ACTUALIZAR presionado. Iniciando procedimiento nuclear v14...');
         
         // 1. OCULTAR EL BOTÓN INMEDIATAMENTE (Para que el usuario sepa que funcionó)
         setShowUpdatePrompt(false);
@@ -113,7 +113,7 @@ function AppContent() {
             // Solo registrar en producción
             if ('serviceWorker' in navigator && !import.meta.env.DEV) {
                 try {
-                    console.log('[APP] Registrando Service Worker v13...');
+                    console.log('[APP] Registrando Service Worker v14...');
                     const registration = await navigator.serviceWorker.register('/sw.js');
                     console.log('[APP] Service Worker registrado con éxito:', registration);
                     setUpdateRegistration(registration);
@@ -123,7 +123,7 @@ function AppContent() {
                         const newWorker = registration.installing;
                         const currentWorker = registration.waiting || registration.active;
 
-                        console.log('[APP] Nueva versión de SW encontrada (v13).');
+                        console.log('[APP] Nueva versión de SW encontrada (v14).');
                         console.log('[APP] - Nuevo Worker (installing):', newWorker);
                         console.log('[APP] - Worker actual (waiting):', registration.waiting);
                         console.log('[APP] - Worker activo (active):', registration.active);
@@ -310,7 +310,7 @@ function AppContent() {
 
     return (
         <>
-            {/* --- ALERTA DE ACTUALIZACIÓN DE PWA (FINAL v13) --- */}
+            {/* --- ALERTA DE ACTUALIZACIÓN DE PWA (FINAL v14) --- */}
             <Snackbar 
                 open={showUpdatePrompt} 
                 anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
