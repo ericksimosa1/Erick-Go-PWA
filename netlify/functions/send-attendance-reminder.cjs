@@ -1,4 +1,4 @@
-// netlify/functions/send-attendance-reminder.cjs (VERSIÓN FINAL CON NOMBRE DE EMPRESA)
+// netlify/functions/send-attendance-reminder.cjs (CORREGIDO Y OPTIMIZADO)
 const webPush = require('web-push');
 const admin = require('firebase-admin');
 
@@ -46,7 +46,7 @@ if (vapidPublicKey && vapidPrivateKey) {
     console.warn(">>> [WARN] Claves VAPID no encontradas.");
 }
 
-// --- FUNCIÓN MEJORADA ---
+// --- FUNCIÓN DE CONFIGURACIÓN ---
 async function getNotificationConfig(clientId) {
     try {
         const db = admin.firestore();
@@ -132,42 +132,65 @@ exports.handler = async function (event, context) {
                 continue;
             }
 
+            // --- FIX 1: CONSULTA DE VINCULOS (SIN ÍNDICE COMPUESTO) ---
+            // Traemos todos los vínculos de la empresa y filtramos en memoria
             const vinculosSnapshot = await db.collection('vinculos')
                 .where('clientId', '==', clientId)
-                .where('rol', '==', 'empleado')
-                .where('activo', '==', true)
                 .get();
             
-            if (vinculosSnapshot.empty) continue;
-            const employeeIds = vinculosSnapshot.docs.map(doc => doc.data().userId);
-            
-            // Filtrar Opt-Outs
-            const suscripcionesSnapshot = await db.collection('suscripciones')
-                .where('clientId', '==', clientId)
-                .where('dailyOptOut', '==', true)
-                .get();
-            
-            const optedOutUserIds = new Set();
-            suscripcionesSnapshot.forEach(doc => {
+            const employeeIds = [];
+            vinculosSnapshot.forEach(doc => {
                 const data = doc.data();
-                const optOutDate = data.dailyOptOutDate ? data.dailyOptOutDate.toDate() : null;
-                const today = new Date();
-                today.setHours(0,0,0,0);
-                if (optOutDate) {
-                    const optDateClean = new Date(optOutDate);
-                    optDateClean.setHours(0,0,0,0);
-                    if (optDateClean.getTime() === today.getTime()) {
-                        optedOutUserIds.add(data.userId);
-                    }
+                if (data.rol === 'empleado' && data.activo !== false) {
+                    employeeIds.push(data.userId);
                 }
             });
-            
+
+            if (employeeIds.length === 0) continue;
+            // -----------------------------------------------------
+
+            // --- FIX 2: CARGA MASIVA DE SUSCRIPCIONES (OPTIMIZACIÓN) ---
+            // Cargamos todas las suscripciones de la empresa en un Map para evitar consultas dobles
+            const suscripcionesSnapshot = await db.collection('suscripciones')
+                .where('clientId', '==', clientId)
+                .get();
+
+            const suscripcionesMap = new Map(); // Mapa: userId -> { subscription, dailyOptOut, dailyOptOutDate }
+            const optedOutUserIds = new Set();
+
+            // Fecha hoy a medianoche para comparar
+            const today = new Date();
+            today.setHours(0,0,0,0);
+
+            suscripcionesSnapshot.forEach(doc => {
+                const data = doc.data();
+                const uid = doc.id;
+                
+                // Verificar Opt-Out en memoria
+                if (data.dailyOptOut === true) {
+                    const optOutDate = data.dailyOptOutDate ? data.dailyOptOutDate.toDate() : null;
+                    if (optOutDate) {
+                        const optDateClean = new Date(optOutDate);
+                        optDateClean.setHours(0,0,0,0);
+                        if (optDateClean.getTime() === today.getTime()) {
+                            optedOutUserIds.add(uid);
+                        }
+                    }
+                }
+                
+                // Guardar la suscripción en el mapa
+                if (data.subscription && data.subscription.endpoint) {
+                    suscripcionesMap.set(uid, data.subscription);
+                }
+            });
+            // -----------------------------------------------------
+
+            // Filtrar empleados válidos (que no marcaron opt-out)
             const targetEmployees = employeeIds.filter(id => !optedOutUserIds.has(id));
             
             if (targetEmployees.length === 0) continue;
             
-            // --- AQUÍ ESTÁ EL CAMBIO ---
-            const payload = {
+            const payloadBase = {
                 title: 'Recordatorio de Asistencia',
                 body: `Aún no has registrado tu asistencia ni seleccionado zona de destino en ${clientName}. Por favor hazlo.`,
                 icon: '/erick-go-logo.png',
@@ -180,33 +203,42 @@ exports.handler = async function (event, context) {
                 ],
                 data: { url: '/login', type: 'attendance_reminder' }
             };
-            
+
+            // Necesitamos los nombres, los buscamos en lote
+            // Nota: Firestore 'in' soporta hasta 10 items. Si hay >10 empleados, deberíamos usar chunks.
+            // Para simplificar este ejemplo, usaremos chunks básicos.
             let sentCount = 0;
-            for (const userId of targetEmployees) {
-                try {
-                    const subDoc = await db.collection('suscripciones').doc(userId).get();
-                    if (!subDoc.exists) continue;
-                    
-                    const subscription = subDoc.data().subscription;
-                    if (!subscription || !subscription.endpoint) continue;
+            const employeeChunks = [];
+            const copyIds = [...targetEmployees];
+            while(copyIds.length) employeeChunks.push(copyIds.splice(0, 10));
 
-                    const userDoc = await db.collection('usuarios').doc(userId).get();
-                    const userName = userDoc.exists() ? userDoc.data().nombre : 'Empleado';
-                    
-                    // Como payload.body ya tiene el nombre de la empresa, aquí se mantiene
-                    const personalizedPayload = {
-                        ...payload,
-                        body: `${userName}, ${payload.body}`,
-                        data: { ...payload.data, userId: userId, clientId: clientId, userName: userName }
-                    };
+            for (const chunk of employeeChunks) {
+                // Obtener usuarios del chunk
+                const usersSnap = await db.collection('usuarios')
+                    .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+                    .get();
+                
+                usersSnap.forEach(doc => {
+                    const userId = doc.id;
+                    const userName = doc.data().nombre || 'Empleado';
+                    const subscription = suscripcionesMap.get(userId);
 
-                    await webPush.sendNotification(subscription, JSON.stringify(personalizedPayload));
-                    sentCount++;
-                } catch (error) {
-                    if (error.statusCode === 410) {
-                        await db.collection('suscripciones').doc(userId).delete();
+                    if (subscription) {
+                        const personalizedPayload = {
+                            ...payloadBase,
+                            body: `${userName}, ${payloadBase.body}`,
+                            data: { ...payloadBase.data, userId: userId, clientId: clientId, userName: userName }
+                        };
+
+                        webPush.sendNotification(subscription, JSON.stringify(personalizedPayload))
+                            .then(() => sentCount++)
+                            .catch((error) => {
+                                if (error.statusCode === 410) {
+                                    db.collection('suscripciones').doc(userId).delete();
+                                }
+                            });
                     }
-                }
+                });
             }
             
             results.push({ clientId, clientName, recipients: targetEmployees.length, sentCount: sentCount });

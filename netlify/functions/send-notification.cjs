@@ -1,4 +1,4 @@
-// netlify/functions/send-notification.cjs
+// netlify/functions/send-notification.cjs (CORREGIDO: Sin error de índice)
 const webPush = require('web-push');
 const admin = require('firebase-admin');
 
@@ -26,7 +26,7 @@ if (!admin.apps.length) {
             credential: admin.credential.cert(serviceAccount),
             databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
         });
-        console.log('>>> [SUCCESS] Firebase Admin inicializado en send-notification (Clave Unificada).');
+        console.log('>>> [SUCCESS] Firebase Admin inicializado (Clave Unificada).');
     } catch (error) {
         console.error('>>> [ERROR] Error al inicializar Firebase Admin:', error);
         throw new Error("Configuración faltante");
@@ -47,7 +47,6 @@ if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
 // ====================================================================
 function chunkArray(array, chunkSize) {
     const results = [];
-    // Copiamos el array para no mutar el original con splice
     const copy = [...array];
     while (copy.length) {
         results.push(copy.splice(0, chunkSize));
@@ -59,7 +58,7 @@ function chunkArray(array, chunkSize) {
 // HANDLER DE LA FUNCIÓN
 // ====================================================================
 exports.handler = async function (event, context) {
-  console.log('=== INICIO send-notification (Versión Multi-Empresa vía Vínculos) ===');
+  console.log('=== INICIO send-notification (Versión sin error de índice) ===');
   
   if (event.httpMethod !== 'POST') {
     return {
@@ -90,9 +89,8 @@ exports.handler = async function (event, context) {
       let subscriptions = [];
 
       // 1. OBTENER USUARIOS Y SEPARAR ROLES
-      // Usamos chunks para no romper el límite de 10 en queries
       const adminIds = [];
-      const otherIds = []; // Conductores y Empleados
+      const otherIds = []; 
       
       const userIdChunks = chunkArray([...targetUserIds], 10);
       console.log(`Verificando roles de ${targetUserIds.length} usuarios...`);
@@ -136,35 +134,29 @@ exports.handler = async function (event, context) {
 
       // 3. PROCESAR CONDUCTORES Y EMPLEADOS (Validación por Vínculos)
       if (otherIds.length > 0 && clientId) {
-            console.log('Verificando vínculos activos para la empresa:', clientId);
+            console.log('Verificando vínculos para la empresa:', clientId);
             
-            // Buscamos TODOS los vínculos de esa empresa (incluso si son 100 usuarios)
+            // CORRECCIÓN CRÍTICA: Filtramos solo por clientId para evitar error de índice compuesto
             const vinculosSnapshot = await db.collection('vinculos')
                 .where('clientId', '==', clientId)
-                .where('activo', '!=', false) // Trae solo activos (true o null)
                 .get();
 
-            console.log(`Se encontraron ${vinculosSnapshot.size} vínculos activos en la empresa.`);
+            console.log(`Se encontraron ${vinculosSnapshot.size} vínculos (incluyendo inactivos).`);
 
-            // Filtramos en memoria para encontrar coincidencias con nuestra lista de objetivos
             const validUserIds = new Set();
             
             vinculosSnapshot.forEach(doc => {
                 const data = doc.data();
-                // Si este usuario está en nuestra lista de objetivos (otherIds)
-                if (otherIds.includes(data.userId)) {
+                // Verificamos activo en MEMORIA (JavaScript) en lugar de en la Query (Firestore)
+                if (data.activo !== false && otherIds.includes(data.userId)) {
                     validUserIds.add(data.userId);
                 }
             });
 
             const usersToNotify = Array.from(validUserIds);
-            console.log(`Usuarios válidos encontrados dentro de la empresa: ${usersToNotify.length}`);
+            console.log(`Usuarios válidos y activos encontrados: ${usersToNotify.length}`);
 
             if (usersToNotify.length > 0) {
-                // AHORA sí buscamos suscripciones.
-                // IMPORTANTE: No filtramos por clientId aquí. Si tienen vínculo válido, tienen derecho a recibir.
-                // Esto soluciona el problema de usuarios con múltiples empresas.
-                
                 const validUserChunks = chunkArray(usersToNotify, 10);
                 
                 for (const chunk of validUserChunks) {
