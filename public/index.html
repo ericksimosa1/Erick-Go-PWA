@@ -24,13 +24,13 @@
   <body>
     <div id="root"></div>
     
-    <!-- --- SCRIPT DEL SERVICE WORKER CON CACHE BUSTER V16 --- -->
+    <!-- --- SCRIPT DEL SERVICE WORKER CON CACHE BUSTER V17 --- -->
     <!-- Al poner ?v=12, obligamos al navegador a descargar el archivo SW nuevo -->
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          console.log('[HTML] Registrando Service Worker v16 desde public/index.html');
-          navigator.serviceWorker.register('/sw.js?v=16');
+          console.log('[HTML] Registrando Service Worker v17 desde public/index.html');
+          navigator.serviceWorker.register('/sw.js?v=17');
         });
       }
     </script>
