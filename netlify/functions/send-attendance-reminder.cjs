@@ -46,6 +46,12 @@ if (vapidPublicKey && vapidPrivateKey) {
     console.warn(">>> [WARN] Claves VAPID no encontradas.");
 }
 
+// --- FUNCIÓN AUXILIAR DE ZONA HORARIA ---
+const getVenezuelaDate = () => {
+    const now = new Date();
+    return new Date(now.getTime() - (4 * 60 * 60 * 1000)); 
+};
+
 // --- FUNCIÓN DE CONFIGURACIÓN ---
 async function getNotificationConfig(clientId) {
     try {
@@ -103,21 +109,22 @@ exports.handler = async function (event, context) {
                 continue;
             }
 
-            // --- LÓGICA DE TIEMPO ---
+            // --- LÓGICA DE TIEMPO (AJUSTADA A VENEZUELA) ---
             const startTimeStr = config.attendanceReminderStartTime || "09:00";
             const endTimeStr = config.attendanceReminderEndTime || "18:00";
 
             const [startH, startM] = startTimeStr.split(':').map(Number);
             const [endH, endM] = endTimeStr.split(':').map(Number);
+            
+            const nowVZLA = getVenezuelaDate();
+            const currentHour = nowVZLA.getHours();
+            const currentMinute = nowVZLA.getMinutes();
+            
             const startMinutes = startH * 60 + startM;
             const endMinutes = endH * 60 + endM;
+            const currentTotalMinutes = currentHour * 60 + currentMinute;
 
-            const now = new Date();
-            const nowHour = (now.getHours() - 4 + 24) % 24; 
-            const nowMinute = now.getMinutes();
-            const currentTotalMinutes = nowHour * 60 + nowMinute;
-
-            console.log(`[DEBUG] Cliente: ${clientName}. Hora VZLA: ${nowHour}:${nowMinute}. Rango: ${startTimeStr} - ${endTimeStr}`);
+            console.log(`[DEBUG] Cliente: ${clientName}. Hora VZLA: ${currentHour}:${currentMinute}. Rango: ${startTimeStr} - ${endTimeStr}`);
 
             const isWithinWindow = (currentTotalMinutes >= startMinutes && currentTotalMinutes <= endMinutes);
             
@@ -145,16 +152,17 @@ exports.handler = async function (event, context) {
                 continue;
             }
 
-            // --- 2. CARGA DE ASISTENCIAS DE HOY (NUEVO) ---
-            const today = new Date();
-            today.setHours(0,0,0,0);
-            const tomorrow = new Date(today);
-            tomorrow.setDate(tomorrow.getDate() + 1);
+            // --- 2. CARGA DE ASISTENCIAS DE HOY (CORREGIDO ZONA HORARIA) ---
+            const startOfDayVZLA = new Date(nowVZLA);
+            startOfDayVZLA.setHours(0, 0, 0, 0);
+            
+            const endOfDayVZLA = new Date(startOfDayVZLA);
+            endOfDayVZLA.setDate(endOfDayVZLA.getDate() + 1);
 
             const asistenciasSnapshot = await db.collection('asistencias')
                 .where('clientId', '==', clientId)
-                .where('fecha', '>=', admin.firestore.Timestamp.fromDate(today))
-                .where('fecha', '<', admin.firestore.Timestamp.fromDate(tomorrow))
+                .where('fecha', '>=', admin.firestore.Timestamp.fromDate(startOfDayVZLA))
+                .where('fecha', '<', admin.firestore.Timestamp.fromDate(endOfDayVZLA))
                 .get();
 
             const attendanceMap = new Map();
@@ -163,7 +171,7 @@ exports.handler = async function (event, context) {
             });
             // -----------------------------------------------------
 
-            // --- 3. CARGA DE SUSCRIPCIONES ---
+            // --- 3. CARGA DE SUSCRIPCIONES Y OPT-OUTS ---
             const suscripcionesSnapshot = await db.collection('suscripciones')
                 .where('clientId', '==', clientId)
                 .get();
@@ -175,12 +183,13 @@ exports.handler = async function (event, context) {
                 const data = doc.data();
                 const uid = doc.id;
                 
+                // Lógica Opt-Out ajustada a Venezuela
                 if (data.dailyOptOut === true) {
                     const optOutDate = data.dailyOptOutDate ? data.dailyOptOutDate.toDate() : null;
                     if (optOutDate) {
-                        const optDateClean = new Date(optOutDate);
-                        optDateClean.setHours(0,0,0,0);
-                        if (optDateClean.getTime() === today.getTime()) {
+                        const optDateVZLA = new Date(optOutDate.getTime() - (4 * 60 * 60 * 1000));
+                        optDateVZLA.setHours(0,0,0,0);
+                        if (optDateVZLA.getTime() === startOfDayVZLA.getTime()) {
                             optedOutUserIds.add(uid);
                         }
                     }
@@ -191,15 +200,14 @@ exports.handler = async function (event, context) {
                 }
             });
 
-            // Filtramos empleados preliminares
-            const potentialEmployees = employeeIds; // Mantenemos todos para validar individualmente abajo
+            const potentialEmployees = employeeIds; 
             
             if (potentialEmployees.length === 0) continue;
             
             const payloadBase = {
                 title: 'Recordatorio de Asistencia',
                 body: `Aún no has registrado tu asistencia ni seleccionado zona de destino en ${clientName}. Por favor hazlo.`,
-                icon: '/erick-go-logo.png',
+                icon: '/icons/android-chrome-192x192.png', // LOGO CORREGIDO
                 tag: 'attendance-reminder',
                 renotify: true,
                 requireInteraction: true,
@@ -226,28 +234,24 @@ exports.handler = async function (event, context) {
                     const userId = doc.id;
                     const userName = doc.data().nombre || 'Empleado';
 
-                    // 1. Verificar Opt-Out (No usar transporte hoy)
                     if (optedOutUserIds.has(userId)) {
                         console.log(`[SKIP] ${userName}: Marcó "No usar transporte" hoy.`);
                         skippedCount++;
                         continue;
                     }
 
-                    // 2. Verificar Asistencia Ya Registrada
                     if (attendanceMap.has(userId)) {
                         console.log(`[SKIP] ${userName}: Ya registró asistencia hoy.`);
                         skippedCount++;
                         continue;
                     }
 
-                    // 3. Verificar Suscripción Activa
                     if (!suscripcionesMap.has(userId)) {
                         console.log(`[SKIP] ${userName}: No tiene suscripción activa.`);
                         skippedCount++;
                         continue;
                     }
 
-                    // Si pasa todos los filtros, enviar notificación
                     const subscription = suscripcionesMap.get(userId);
                     const personalizedPayload = {
                         ...payloadBase,
