@@ -30,11 +30,12 @@ export const useFirestore = () => {
         return null;
     }, []);
 
-    // FUNCIÓN DE BORRADO PERMANENTE
-    const deleteUserPermanently = useCallback(async (userId, clientId) => {
+    // NUEVA FUNCIÓN DE BORRADO PERMANENTE SERVIDOR
+        const deleteUserPermanently = useCallback(async (userId, clientId) => {
         try {
             console.log(`>>> [INFO] Solicitando eliminación de usuario ${userId} del cliente ${clientId} (Backend)`);
             
+            // Llamamos al servidor para hacer todo el trabajo pesado
             const response = await fetch('/.netlify/functions/delete-user-auth', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -53,7 +54,11 @@ export const useFirestore = () => {
             const result = await response.json();
             console.log(`>>> [SUCCESS] Usuario eliminado correctamente según el servidor.`);
             
+            // =================================================================
+            // ESTA ES LA LÍNEA QUE FALTABA Y ES MUY IMPORTANTE
+            // =================================================================
             return { success: true, isLastLink: result.isLastLink };
+            // =================================================================
             
         } catch (error) {
             console.error(">>> [ERROR] Error en deleteUserPermanently:", error);
@@ -61,7 +66,7 @@ export const useFirestore = () => {
         }
     }, []);
 
-    // FUNCIÓN: Obtener administradores globales
+    // NUEVA FUNCIÓN: Obtener administradores globales (no vinculados a empresas)
     const fetchGlobalAdministrators = useCallback(async () => {
         try {
             const usersCollection = collection(db, 'usuarios');
@@ -102,7 +107,10 @@ export const useFirestore = () => {
 
             const userIds = vinculosSnapshot.docs.map(doc => doc.data().userId);
 
-            if (userIds.length === 0) return [];
+            // Si no hay usuarios, retornar array vacío
+            if (userIds.length === 0) {
+                return [];
+            }
 
             const usersCollection = collection(db, 'usuarios');
             const qUsers = query(usersCollection, where(documentId(), 'in', userIds));
@@ -132,6 +140,7 @@ export const useFirestore = () => {
                         gruposZonas: vinculoData.gruposZonas || [],
                         esEncargadoCierre: vinculoData.esEncargadoCierre || false,
                     };
+                    console.log(`>>> [DEBUG fetchUsersByClient] Usuario ${userData.nombre} (Vinculo: ${vinculoData.id}) tiene GRUPOS:`, userObject.gruposZonas);
                     return userObject;
                 }
                 return null;
@@ -145,7 +154,7 @@ export const useFirestore = () => {
         }
     }, []);
 
-    // --- FUNCIONES DE VÍNCULOS ---
+    // --- FUNCIONES DE VÍNCULOS (USUARIO-CLIENTE) ---
     const fetchUserVinculos = useCallback(async (userId) => {
         const q = query(collection(db, 'vinculos'), where('userId', '==', userId));
         const querySnapshot = await getDocs(q);
@@ -181,7 +190,7 @@ export const useFirestore = () => {
         return docRef.id;
     }, []);
 
-    // --- FUNCIONES DE CLIENTES ---
+    // --- FUNCIONES DE CLIENTES (EMPRESAS) ---
     const fetchClients = useCallback(async () => {
         const clientsCollection = collection(db, 'clientes');
         const clientSnapshot = await getDocs(clientsCollection);
@@ -246,7 +255,7 @@ export const useFirestore = () => {
             where('clientId', '==', clientId),
             where('fecha', '>=', Timestamp.fromDate(today)),
             where('fecha', '<', Timestamp.fromDate(tomorrow)),
-            where('completado', '==', false)
+            where('completado', '==', false) // Solo obtener asistencias no completadas
         );
         const querySnapshot = await getDocs(q);
         return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -311,11 +320,17 @@ export const useFirestore = () => {
         });
     }, []);
 
+    // ====================================================================
+    // CORRECCIÓN: Nueva función para eliminar la asistencia de un empleado
+    // ====================================================================
     const deleteEmployeeAttendanceForToday = useCallback(async (asistenciaId, employeeId) => {
         const batch = writeBatch(db);
         const asistenciaRef = doc(db, 'asistencias', asistenciaId);
+
+        // 1. Eliminar el documento de asistencia
         batch.delete(asistenciaRef);
 
+        // 2. Buscar si el empleado está en un viaje activo y removerlo
         const tripsQuery = query(
             collection(db, 'trips'),
             where('empleadosIds', 'array-contains', employeeId),
@@ -325,14 +340,17 @@ export const useFirestore = () => {
 
         if (!tripSnapshot.empty) {
             const tripRef = doc(db, 'trips', tripSnapshot.docs[0].id);
+            // Remover el ID del empleado del array
             batch.update(tripRef, { empleadosIds: arrayRemove(employeeId) });
         }
 
+        // 3. Ejecutar todas las operaciones
         await batch.commit();
     }, []);
 
-    // --- HERRAMIENTAS ADMINISTRATIVAS ---
+    // --- NUEVAS FUNCIONES PARA HERRAMIENTAS ADMINISTRATIVAS ---
     
+    // Función auxiliar para obtener todos los vínculos y depurar
     const debugAllVinculos = useCallback(async () => {
         console.log(">>> [DEBUG] Obteniendo todos los vínculos para depuración...");
         const vinculosCollection = collection(db, 'vinculos');
@@ -362,6 +380,7 @@ export const useFirestore = () => {
         return allVinculosSnapshot;
     }, []);
     
+    // Eliminar usuarios por rol (excepto administradores)
     const deleteUsersByRole = useCallback(async (role) => {
         if (!role || !['empleado', 'conductor', 'cliente'].includes(role)) {
             throw new Error("Rol inválido. Debe ser 'empleado', 'conductor' o 'cliente'.");
@@ -447,6 +466,7 @@ export const useFirestore = () => {
         return { deletedCount: filteredVinculos.length };
     }, [debugAllVinculos]);
 
+    // Crear datos de prueba
     const createTestData = useCallback(async () => {
         console.log(">>> [INFO] Iniciando creación de datos de prueba");
         
@@ -492,7 +512,7 @@ export const useFirestore = () => {
         }
     }, []);
 
-    // --- CONFIGURACIÓN GLOBAL ---
+    // --- NUEVAS FUNCIONES PARA CONFIGURACIÓN GLOBAL ---
     const fetchGlobalConfig = useCallback(async () => {
         try {
             const configRef = doc(db, 'configuracion', 'global');
@@ -502,24 +522,32 @@ export const useFirestore = () => {
                 return configSnap.data();
             }
             
+            // Si no existe, devolvemos un texto por defecto
             return { 
                 loginFooterText: 'Copyright © 2025 Desarrollado por Erick Go\nContacto: erickgoapp@gmail.com' 
             };
         } catch (error) {
-            console.error(">>> [ERROR] Error al cargar configuración global:", error);
+            // CAPTURA DEL ERROR: Si falla por permisos, logueamos pero no detenemos la app
+            console.error(">>> [ERROR] Error al cargar configuración global (probablemente permisos):", error);
+            
+            // Devolvemos texto por defecto para que el Login pueda seguir funcionando
             return { 
                 loginFooterText: 'Copyright © 2025 Desarrollado por Erick Go\nContacto: erickgoapp@gmail.com' 
             };
         }
     }, []);
 
+    // ============================================================
+    // FUNCIÓN FALTANTE QUE CAUSA TU ERROR
+    // ============================================================
     const updateGlobalConfig = useCallback(async (configData) => {
         const configRef = doc(db, 'configuracion', 'global');
         await setDoc(configRef, configData, { merge: true });
     }, []);
+    // ============================================================
 
     // ====================================================================
-    // CORRECCIÓN: GESTIÓN DE CIERRE INDIVIDUAL (CLAVE PARA NOTIFICACIONES)
+    // CORRECCIÓN: NUEVAS FUNCIONES PARA GESTIÓN DE CIERRE INDIVIDUAL POR CONDUCTOR
     // ====================================================================
     
     // Obtener la hora de cierre para un conductor específico
@@ -531,6 +559,8 @@ export const useFirestore = () => {
             tomorrow.setDate(today.getDate() + 1);
             
             const closingCollection = collection(db, 'cierres');
+            
+            // Buscar por clientId y fecha (Consulta simple, requiere índice estándar o auto)
             const q1 = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -539,6 +569,8 @@ export const useFirestore = () => {
             );
             
             const querySnapshot1 = await getDocs(q1);
+            
+            // Filtrar por userId en el cliente (JavaScript)
             const closingRecords = querySnapshot1.docs.filter(doc => doc.data().userId === driverId);
             
             if (closingRecords.length > 0) {
@@ -562,7 +594,7 @@ export const useFirestore = () => {
             
             const closingCollection = collection(db, 'cierres');
             
-            // 1. Buscar todos los cierres para la empresa hoy
+            // 1. Buscar todos los cierres para la empresa hoy (Query simple)
             const q = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -580,28 +612,25 @@ export const useFirestore = () => {
                 horaCierre: time, 
                 userId: driverId, 
                 userName: registeredByName, 
-                fecha: Timestamp.now() // IMPORTANTE: Fecha para que funcione el Admin
+                fecha: Timestamp.now() 
             };
             
             if (!existingRecord) {
-                // No existe, crear uno nuevo (PRIMERA VEZ)
-                console.log(`>>> [setClosingTimeForDriver] Creando registro de cierre para conductor ${driverId}`);
+                // No existe, crear uno nuevo
                 await addDoc(closingCollection, closingData);
             } else {
-                // Ya existe, actualizarlo (ACTUALIZACIÓN)
-                console.log(`>>> [setClosingTimeForDriver] Actualizando registro de cierre para conductor ${driverId}`);
+                // Ya existe, actualizarlo
                 await updateDoc(doc(db, 'cierres', existingRecord.id), closingData);
             }
             
             return true;
         } catch (error) {
             console.error(">>> [ERROR] Error al establecer la hora de cierre del conductor:", error);
-            // IMPORTANTE: Lanzamos el error para que se maneje arriba si es crítico
-            throw error; 
+            return false;
         }
     }, []);
 
-    // Limpiar la hora de cierre de un conductor específico
+    // CORRECCIÓN: Función para limpiar la hora de cierre de un conductor específico
     const clearTodayClosingTimeForDriver = useCallback(async (clientId, driverId) => {
         try {
             const today = new Date();
@@ -611,6 +640,7 @@ export const useFirestore = () => {
             
             const closingCollection = collection(db, 'cierres');
             
+            // 1. Buscar todos los cierres para la empresa hoy
             const q = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -620,6 +650,7 @@ export const useFirestore = () => {
             
             const querySnapshot = await getDocs(q);
             
+            // 2. Filtrar para encontrar el registro específico de este conductor
             const driverRecord = querySnapshot.docs.find(doc => doc.data().userId === driverId);
             
             if (driverRecord) {
@@ -635,6 +666,7 @@ export const useFirestore = () => {
         }
     }, []);
 
+    // CORRECCIÓN: Función para limpiar todas las horas de cierre del día
     const clearAllClosingTimesForToday = useCallback(async (clientId) => {
         try {
             const today = new Date();
@@ -658,6 +690,7 @@ export const useFirestore = () => {
                 return false;
             }
             
+            // Eliminar todos los registros de cierre del día
             const batch = writeBatch(db);
             querySnapshot.docs.forEach(doc => {
                 batch.delete(doc.ref);
@@ -673,6 +706,7 @@ export const useFirestore = () => {
         }
     }, []);
 
+    // CORRECCIÓN: Función para marcar la jornada de un conductor como finalizada
     const markDriverWorkdayAsCompleted = useCallback(async (clientId, driverId) => {
         try {
             const today = new Date();
@@ -682,6 +716,7 @@ export const useFirestore = () => {
             
             const closingCollection = collection(db, 'cierres');
             
+            // Buscar todos los registros de hoy y filtrar por userId
             const q = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -693,7 +728,9 @@ export const useFirestore = () => {
             const driverRecord = querySnapshot.docs.find(doc => doc.data().userId === driverId);
             
             if (driverRecord) {
-                await updateDoc(driverRecord.ref, { jornadaFinalizada: true });
+                await updateDoc(driverRecord.ref, {
+                    jornadaFinalizada: true
+                });
             }
             
             return true;
@@ -703,7 +740,7 @@ export const useFirestore = () => {
         }
     }, []);
 
-    // --- FUNCIONES LEGADO ---
+    // --- FUNCIONES LEGADO (MANTENIDAS PARA COMPATIBILIDAD) ---
     const setClosingTime = useCallback(async (clientId, closingTime, userId, userName) => {
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
@@ -786,7 +823,11 @@ export const useFirestore = () => {
         return null;
     }, []);
 
-    // --- CONFIGURACIÓN SEMANAL DE CIERRE ---
+    // ====================================================================
+    // NUEVAS FUNCIONES PARA CONFIGURACIÓN SEMANAL DE CIERRE
+    // ====================================================================
+    
+    // Obtener la configuración semanal de encargados de cierre
     const fetchWeeklyClosingConfig = useCallback(async (clientId) => {
         try {
             const configRef = doc(db, 'clientes', clientId, 'configuracion', 'cierreSemanal');
@@ -796,6 +837,7 @@ export const useFirestore = () => {
                 return configSnap.data();
             }
             
+            // Si no existe configuración, devolver configuración por defecto
             const defaultConfig = {
                 lunes: { vinculoId: null, userId: null, userName: null },
                 martes: { vinculoId: null, userId: null, userName: null },
@@ -807,10 +849,13 @@ export const useFirestore = () => {
                 ultimaActualizacion: Timestamp.now()
             };
             
+            // Crear la configuración por defecto
             await setDoc(configRef, defaultConfig);
             return defaultConfig;
         } catch (error) {
             console.error(">>> [ERROR] Error al obtener configuración semanal de cierre:", error);
+            // CORRECCIÓN CRÍTICA: Devolver configuración por defecto en caso de error (permisos, red, etc.)
+            // para evitar que el estado sea null y crashee la UI.
             return {
                 lunes: { vinculoId: null, userId: null, userName: null },
                 martes: { vinculoId: null, userId: null, userName: null },
@@ -824,6 +869,7 @@ export const useFirestore = () => {
         }
     }, []);
 
+    // Actualizar la configuración semanal de encargados de cierre
     const updateWeeklyClosingConfig = useCallback(async (clientId, weeklyConfig) => {
         try {
             const configRef = doc(db, 'clientes', clientId, 'configuracion', 'cierreSemanal');
@@ -840,15 +886,21 @@ export const useFirestore = () => {
         }
     }, []);
 
+    // Obtener el encargado de cierre para el día actual según la configuración semanal
     const getTodayClosingPersonFromWeeklyConfig = useCallback(async (clientId) => {
         try {
             const weeklyConfig = await fetchWeeklyClosingConfig(clientId);
             if (!weeklyConfig) return null;
             
+            // Obtener el día de la semana actual (0 = domingo, 1 = lunes, etc.)
             const today = new Date();
             const dayOfWeek = today.getDay();
+            
+            // Mapear el número del día al nombre en español
             const dayNames = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
             const todayName = dayNames[dayOfWeek];
+            
+            // Obtener la configuración para el día actual
             const todayConfig = weeklyConfig[todayName];
             
             if (todayConfig && todayConfig.userId) {
@@ -866,35 +918,67 @@ export const useFirestore = () => {
         }
     }, [fetchWeeklyClosingConfig]);
 
+    // Función para convertir hora de 24h a 12h con AM/PM
     const convertTo12HourFormat = useCallback((time24) => {
         if (!time24) return '';
+        
+        // Separar horas y minutos
         const [hours, minutes] = time24.split(':');
+        
+        // Convertir a número
         let hoursNum = parseInt(hours, 10);
         const minutesNum = parseInt(minutes, 10);
+        
+        // Determinar AM o PM
         const period = hoursNum >= 12 ? 'PM' : 'AM';
+        
+        // Convertir a formato 12h
         hoursNum = hoursNum % 12 || 12;
+        
+        // Formatear con ceros a la izquierda si es necesario
         const formattedHours = hoursNum.toString().padStart(2, '0');
         const formattedMinutes = minutesNum.toString().padStart(2, '0');
+        
         return `${formattedHours}:${formattedMinutes} ${period}`;
     }, []);
 
+    // Función para convertir hora de 12h a 24h
     const convertTo24HourFormat = useCallback((time12) => {
         if (!time12) return '';
+        
+        // Separar hora, minutos y período (AM/PM)
         const timeParts = time12.trim().split(' ');
-        if (timeParts.length !== 2) return time12;
+        if (timeParts.length !== 2) return time12; // Devolver original si no tiene formato esperado
+        
         const [time, period] = timeParts;
         const [hours, minutes] = time.split(':');
+        
+        // Convertir a número
         let hoursNum = parseInt(hours, 10);
-        if (period.toUpperCase() === 'PM' && hoursNum < 12) hoursNum += 12;
-        else if (period.toUpperCase() === 'AM' && hoursNum === 12) hoursNum = 0;
+        const minutesNum = parseInt(minutes, 10);
+        
+        // Convertir a formato 24h
+        if (period.toUpperCase() === 'PM' && hoursNum < 12) {
+            hoursNum += 12;
+        } else if (period.toUpperCase() === 'AM' && hoursNum === 12) {
+            hoursNum = 0;
+        }
+        
+        // Formatear con ceros a la izquierda
         const formattedHours = hoursNum.toString().padStart(2, '0');
-        const formattedMinutes = minutes.toString().padStart(2, '0');
+        const formattedMinutes = minutesNum.toString().padStart(2, '0');
+        
         return `${formattedHours}:${formattedMinutes}`;
     }, []);
 
-    // --- SINCRONIZACIÓN DE CIERRES EN TIEMPO REAL ---
+    // ====================================================================
+    // CORRECCIÓN: NUEVAS FUNCIONES PARA SINCRONIZACIÓN DE CIERRES EN TIEMPO REAL
+    // ====================================================================
+    
+    // Función para notificar cambios en las horas de cierre
     const notifyClosingTimeChange = useCallback(async (clientId, driverId, newClosingTime) => {
         try {
+            // Crear un documento en una colección de notificaciones
             const notificationsRef = collection(db, 'clientes', clientId, 'notificaciones');
             await addDoc(notificationsRef, {
                 type: 'closingTimeChange',
@@ -908,8 +992,12 @@ export const useFirestore = () => {
         }
     }, []);
 
+    // Función para escuchar cambios en las horas de cierre
     const listenToClosingTimeChanges = useCallback((clientId, callback) => {
         if (!clientId) return () => {};
+        
+        // CORRECCIÓN: Simplificar la consulta para evitar el error de índice
+        // Usamos una consulta más simple sin ordenamiento para evitar problemas de índice
         const notificationsRef = collection(db, 'clientes', clientId, 'notificaciones');
         const q = query(
             notificationsRef,
@@ -927,6 +1015,10 @@ export const useFirestore = () => {
         });
     }, []);
 
+    // ====================================================================
+    // CORRECCIÓN IMPORTANTE: Función para obtener tanto la hora de cierre del conductor como la de la empresa
+    // CON LIMPIEZA DE DATOS CORRUPTOS (FIX FINAL)
+    // ====================================================================
     const getTodayClosingTimes = useCallback(async (clientId, driverId) => {
         try {
             const today = new Date();
@@ -935,6 +1027,8 @@ export const useFirestore = () => {
             tomorrow.setDate(today.getDate() + 1);
             
             const closingCollection = collection(db, 'cierres');
+            
+            // Buscar todos los cierres para hoy
             const q = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -943,34 +1037,57 @@ export const useFirestore = () => {
             );
             
             const querySnapshot = await getDocs(q);
+            console.log(`>>> [DEBUG getTodayClosingTimes] Se encontraron ${querySnapshot.size} registros de cierre para la empresa ${clientId}`);
+            
+            // Buscar cierre específico del conductor y cierre de la empresa
             let driverClosingTime = null;
             let companyClosingTime = null;
             
+            // CORRECCIÓN: Obtener información del usuario para determinar si es un empleado o conductor
             const userDoc = await getDoc(doc(db, 'usuarios', driverId));
             const userData = userDoc.exists() ? userDoc.data() : null;
             const userRole = userData ? userData.rol : null;
             
+            console.log(`>>> [DEBUG] Información del usuario:`, {
+                userId: driverId,
+                userRole: userRole
+            });
+            
+            // CORRECCIÓN: Usar for...of en lugar de forEach para poder usar await
             for (const queryDocSnapshot of querySnapshot.docs) {
                 const data = queryDocSnapshot.data();
 
+                // ====================================================================
+                // PROTECCIÓN: Ignorar registros corruptos (userId que no es string)
+                // ====================================================================
                 if (!data.userId || typeof data.userId !== 'string') {
                     console.warn(`>>> [WARN LIMPIEZA] Saltando registro de cierre corrupto (ID: ${queryDocSnapshot.id}). userId no es string.`);
-                    continue; 
+                    continue; // <--- CLAVE: Saltar este registro corrupto y pasar al siguiente
                 }
+                // ================================================================================
                 
+                // Si el registro coincide con el ID del conductor
                 if (data.userId === driverId) {
                     driverClosingTime = data.horaCierre;
+                    console.log(`>>> [INFO] Hora de cierre del conductor encontrada: ${data.horaCierre}`);
                 }
                 
+                // CORRECCIÓN: Considerar como cierre de empresa cualquier registro que:
+                // 1. No tenga userId
+                // 2. Tenga isCompanyWide como true
+                // 3. Pertenezca a un usuario con rol 'empleado' (el encargado de cierre)
                 if (!data.userId || data.isCompanyWide === true) {
                     companyClosingTime = data.horaCierre;
+                    console.log(`>>> [INFO] Hora de cierre de la empresa encontrada (criterio 1 o 2): ${data.horaCierre}`);
                 } else if (data.userId && data.userId !== driverId) {
+                    // Verificar si el userId pertenece a un empleado
                     try {
                         const closingUserDoc = await getDoc(doc(db, 'usuarios', data.userId));
                         if (closingUserDoc.exists()) {
                             const closingUserData = closingUserDoc.data();
                             if (closingUserData.rol === 'empleado') {
                                 companyClosingTime = data.horaCierre;
+                                console.log(`>>> [INFO] Hora de cierre de la empresa encontrada (criterio 3 - empleado): ${data.horaCierre}`);
                             }
                         }
                     } catch (error) {
@@ -979,6 +1096,7 @@ export const useFirestore = () => {
                 }
             }
             
+            // Devolver tanto el cierre del conductor como el de la empresa
             return {
                 driverClosingTime,
                 companyClosingTime,
@@ -994,6 +1112,10 @@ export const useFirestore = () => {
         }
     }, []);
 
+    // ====================================================================
+    // NUEVA FUNCIÓN: hasDriverClosingRecordToday
+    // Verifica si un conductor ya tiene un registro de cierre hoy (memoria de notificación)
+    // ====================================================================
     const hasDriverClosingRecordToday = useCallback(async (clientId, driverId) => {
         try {
             const today = new Date();
@@ -1002,6 +1124,8 @@ export const useFirestore = () => {
             tomorrow.setDate(today.getDate() + 1);
             
             const closingCollection = collection(db, 'cierres');
+            
+            // Buscamos todos los registros para la empresa hoy (Query simple)
             const q = query(
                 closingCollection,
                 where('clientId', '==', clientId),
@@ -1010,72 +1134,85 @@ export const useFirestore = () => {
             );
             
             const querySnapshot = await getDocs(q);
+            
+            // Filtramos en JS para ver si existe uno específico para este conductor
             const driverRecord = querySnapshot.docs.find(doc => {
                 const data = doc.data();
+                // ====================================================================
+                // PROTECCIÓN: Ignorar registros corruptos
+                // ====================================================================
                 if (!data.userId || typeof data.userId !== 'string') {
                     return false;
                 }
+                // ================================================================================
                 return data.userId === driverId;
             });
             
+            // Si encuentra un documento, significa que ya fue notificado (o tiene hora asignada)
             return !!driverRecord;
             
         } catch (error) {
             console.error(">>> [ERROR] Error al verificar registro de cierre del conductor:", error);
-            return false;
+            return false; // Si hay error, asumimos que no se ha notificado para no dejarlo sin info
         }
     }, []);
 
     // ====================================================================
-    // FUNCIÓN CLAVE: DISTRIBUIR HORA DE CIERRE Y NOTIFICAR A CONDUCTORES
+    // CORRECCIÓN CRÍTICA: NUEVAS FUNCIONES PARA DISTRIBUIR HORA DE CIERRE A CONDUCTORES
+    // MEJORA: Ahora notifica a TODOS los conductores, independientemente de si tienen empleados pendientes.
+    // MEJORA: Convierte la hora a formato AM/PM en el mensaje.
     // ====================================================================
     
     const distributeClosingTimeToDrivers = useCallback(async (clientId, closingTime, currentUser) => {
         try {
             console.log('>>> [DEBUG distributeClosingTimeToDrivers] Iniciando proceso de distribución...');
             
+            // Validación de usuario
             if (!currentUser || !currentUser.uid) {
                 console.error('>>> [ERROR] currentUser no está definido o no tiene uid');
                 return false;
             }
 
+            // 1. Obtener nombre de la empresa
             const allClients = await fetchClients();
             const currentClient = allClients.find(c => c.id === clientId);
             const companyName = currentClient ? currentClient.nombre : 'tu empresa';
             console.log(`>>> [INFO] Empresa detectada: ${companyName} (ID: ${clientId})`);
+            // ====================================================================
 
+            // 2. Obtener todos los usuarios de la empresa
             const users = await fetchUsersByClient(clientId);
+            
+            // 3. Filtrar solo los conductores
             const drivers = users.filter(user => user.userData.rol === 'conductor');
             console.log(`>>> [INFO] Total conductores encontrados en esta empresa: ${drivers.length}`);
             
+            // 4. Preparar lista de notificados
             const driversToNotify = []; 
 
-            // 5. Iterar sobre TODOS los conductores para asignar su hora
-            // Usamos for...of para asegurar que se guarde antes de notificar
+            // 5. Iterar sobre TODOS los conductores
+            // CAMBIO IMPORTANTE: Ya NO consultamos asistencias aquí. Asignamos hora a todos.
             for (const driver of drivers) {
+                // CORRECCIÓN: Verificar que driver tiene userId
                 if (!driver.userId) {
                     console.warn('>>> [WARN] Conductor sin userId encontrado, saltando...');
                     continue;
                 }
 
-                // Intentamos guardar la hora para este conductor.
-                // Si falla uno, no debe detener el proceso para los demás.
-                try {
-                    await setClosingTimeForDriver(
-                        clientId, 
-                        driver.userId, 
-                        closingTime, 
-                        currentUser.uid, 
-                        currentUser.nombre || 'Usuario desconocido'
-                    );
-                    
-                    console.log(`>>> [SUCCESS] Hora de cierre ${closingTime} asignada/actualizada para el conductor ${driver.userData.nombre}`);
-                    
-                    // Si se guardó exitosamente, lo agregamos a la lista para notificar
-                    driversToNotify.push(driver.userId);
-                } catch (error) {
-                    console.error(`>>> [ERROR] Falló al guardar hora para conductor ${driver.userData.nombre}. Continuando con otros...`, error);
-                }
+                // Guardamos la hora de cierre para que aparezca en su Dashboard
+                // tengan empleados o no.
+                await setClosingTimeForDriver(
+                    clientId, 
+                    driver.userId, 
+                    closingTime, 
+                    currentUser.uid, 
+                    currentUser.nombre || 'Usuario desconocido'
+                );
+                
+                console.log(`>>> [SUCCESS] Hora de cierre ${closingTime} asignada/actualizada para el conductor ${driver.userData.nombre}`);
+                
+                // Agregamos a TODOS los conductores a la lista de notificados
+                driversToNotify.push(driver.userId); 
             }
 
             // 6. Envío de notificaciones
@@ -1084,19 +1221,25 @@ export const useFirestore = () => {
                 // 🔒 PROTECCIÓN MODO DESARROLLO
                 if (import.meta.env.DEV) {
                     console.log(`>>> [DEV MODE] Se omitió el envío de notificaciones a ${driversToNotify.length} conductores.`);
+                    console.log(`>>> [DEV MODE] Se habría enviado: "El encargado ${currentUser.nombre} ha establecido la hora..."`);
                     return true; 
                 }
 
                 console.log(`>>> [INFO] Preparando envío de notificaciones a ${driversToNotify.length} conductores...`);
                 console.log(">>> [INFO] Lista de IDs a notificar:", driversToNotify);
                 
+                // ====================================================================
+                // NUEVO CUERPO DE NOTIFICACIÓN CON NOMBRE DE EMPRESA Y HORA FORMATEADA
+                // ====================================================================
                 const formattedTime = convertTo12HourFormat(closingTime);
                 const notificationPayload = {
                     title: 'Hora de Cierre Actualizada',
+                    // Ahora el mensaje es claro: "establecido para Croii Soledad..."
                     body: `El encargado ${currentUser.nombre} ha establecido la hora de cierre para ${companyName} a las ${formattedTime}.`,
                     icon: '/erick-go-logo.png',
                     data: { url: '/conductor-dashboard' }
                 };
+                // ====================================================================
 
                 try {
                     const response = await fetch('/.netlify/functions/send-notification', {
@@ -1131,23 +1274,41 @@ export const useFirestore = () => {
         }
     }, [fetchUsersByClient, fetchClients, setClosingTimeForDriver, convertTo12HourFormat]);
 
+    // ====================================================================
+    // CORRECCIÓN: NUEVA FUNCIÓN PARA VERIFICAR CONDUCTORES CON EMPLEADOS PENDIENTES
+    // ====================================================================
+    
+    // Función para obtener conductores que todavía tienen empleados pendientes
     const fetchDriversWithPendingEmployees = useCallback(async (clientId, currentDriverId) => {
         try {
+            // Obtener todos los usuarios de la empresa
             const users = await fetchUsersByClient(clientId);
+            
+            // Filtrar solo los conductores (excluyendo al conductor actual)
             const drivers = users.filter(user => 
                 user.userData.rol === 'conductor' && user.userId !== currentDriverId
             );
+            
+            // Obtener las asistencias de hoy
             const todayAsistencias = await fetchTodayAsistencias(clientId);
+            
+            // Array para almacenar los conductores con empleados pendientes
             const driversWithPending = [];
             
+            // Para cada conductor, verificar si tiene empleados pendientes
             for (const driver of drivers) {
-                if (!driver.zonasAsignadas || driver.zonasAsignadas.length === 0) continue;
+                // Verificar si el conductor tiene zonas asignadas
+                if (!driver.zonasAsignadas || driver.zonasAsignadas.length === 0) {
+                    continue;
+                }
                 
+                // Filtrar empleados que están en las zonas del conductor y no han sido completados
                 const pendingEmployees = todayAsistencias.filter(asistencia => {
                     return driver.zonasAsignadas.includes(asistencia.zona) && 
                            !asistencia.completado;
                 });
                 
+                // Si el conductor tiene empleados pendientes, añadirlo al array
                 if (pendingEmployees.length > 0) {
                     driversWithPending.push({
                         driverId: driver.userId,
@@ -1169,6 +1330,9 @@ export const useFirestore = () => {
         }
     }, [fetchUsersByClient, fetchTodayAsistencias]);
 
+    // ====================================================================
+    // NUEVA FUNCIÓN PARA OBTENER CONDUCTORES POR ZONA
+    // ====================================================================
     const fetchDriversByZone = useCallback(async (clientId, zoneId) => {
         if (!clientId || !zoneId) return [];
         console.log(`>>> [DEBUG fetchDriversByZone] Buscando conductores para clientId: ${clientId}, zoneId: ${zoneId}`);
@@ -1206,7 +1370,7 @@ export const useFirestore = () => {
         fetchUsers, updateUser,
         fetchUserByEmail,
         fetchUsersByClient,
-        fetchGlobalAdministrators,
+        fetchGlobalAdministrators, // NUEVA FUNCIÓN EXPORTADA
         fetchUserVinculos, updateUserVinculo, deactivateUserVinculo,
         createVinculo,
         fetchClients, addClient, updateClient, deleteClient,
@@ -1214,33 +1378,57 @@ export const useFirestore = () => {
         addTrip,
         fetchTodayAsistencias, setOrUpdateAsistencia, fetchMyAsistenciaForToday,
         markAsistenciaAsCompleted,
+        // Nuevas funciones
         deleteUsersByRole,
         createTestData,
         fetchGlobalConfig,
-        updateGlobalConfig,
+        updateGlobalConfig, // AQUÍ ESTÁ LA FUNCIÓN FALTANTE
+        // Funciones para gestión de cierre
         setClosingTime,
         getTodayClosingTime,
         clearTodayClosingTime,
         setClosingPerson,
         getTodayClosingPerson,
+        // ====================================================================
+        // CORRECCIÓN: Exportar las nuevas funciones para gestión individual por conductor
+        // ====================================================================
         getTodayClosingTimeForDriver,
         setClosingTimeForDriver,
         clearTodayClosingTimeForDriver,
         clearAllClosingTimesForToday,
         markDriverWorkdayAsCompleted,
         deleteEmployeeAttendanceForToday,
+        // ====================================================================
+        // CORRECCIÓN: NUEVAS FUNCIONES PARA SINCRONIZACIÓN DE CIERRES EN TIEMPO REAL
+        // ====================================================================
         notifyClosingTimeChange,
         listenToClosingTimeChanges,
         getTodayClosingTimes,
+        // ====================================================================
+        // NUEVA FUNCIÓN DE MEMORIA DE CIERRE
+        // ====================================================================
         hasDriverClosingRecordToday,
+        // ====================================================================
+        // CORRECCIÓN: NUEVAS FUNCIONES PARA DISTRIBUIR HORA DE CIERRE A CONDUCTORES
+        // ====================================================================
         distributeClosingTimeToDrivers,
+        // ====================================================================
         fetchDriversWithPendingEmployees,
+        // ====================================================================
+        // NUEVA FUNCIÓN PARA NOTIFICACIONES
+        // ====================================================================
         fetchDriversByZone,
+        // ====================================================================
+        // NUEVAS FUNCIONES PARA CONFIGURACIÓN SEMANAL DE CIERRE
+        // ====================================================================
         fetchWeeklyClosingConfig,
         updateWeeklyClosingConfig,
         getTodayClosingPersonFromWeeklyConfig,
         convertTo12HourFormat,
         convertTo24HourFormat,
+        // ====================================================================
+        // NUEVA FUNCIÓN DE BORRADO
+        // ====================================================================
         deleteUserPermanently
     };
 };
