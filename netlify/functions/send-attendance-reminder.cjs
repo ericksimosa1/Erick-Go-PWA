@@ -207,7 +207,8 @@ exports.handler = async function (event, context) {
             const payloadBase = {
                 title: 'Recordatorio de Asistencia',
                 body: `Aún no has registrado tu asistencia ni seleccionado zona de destino en ${clientName}. Por favor hazlo.`,
-                icon: '/icons/android-chrome-192x192.png', // LOGO CORREGIDO
+                icon: '/icons/android-chrome-192x192.png',
+                badge: '/icons/badge-icon.png', // <--- CORRECCIÓN: BADGE AÑADIDO
                 tag: 'attendance-reminder',
                 renotify: true,
                 requireInteraction: true,

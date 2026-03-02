@@ -195,8 +195,10 @@ exports.handler = async function (event, context) {
         const batchResults = await Promise.allSettled(
           batch.map(async ({ userId, subscription }) => {
             try {
+              // CORRECCIÓN: Inyectamos el badge si no viene en el payload
               const payloadWithTimestamp = {
                 ...payload,
+                badge: payload.badge || '/icons/badge-icon.png',
                 timestamp: Date.now()
               };
               
@@ -236,8 +238,10 @@ exports.handler = async function (event, context) {
     else if (payload && subscription) {
       console.log('Detectado envío automático a una suscripción.');
       try {
+        // CORRECCIÓN: Inyectamos el badge si no viene en el payload
         const payloadWithTimestamp = {
           ...payload,
+          badge: payload.badge || '/icons/badge-icon.png',
           timestamp: Date.now()
         };
         

@@ -909,11 +909,6 @@ export default function AdminDashboard() {
                         aria-label="admin tabs"
                         variant="scrollable"
                         scrollButtons="auto"
-                        sx={{ 
-                            '& .MuiTabs-flexContainer': {
-                                justifyContent: 'center'
-                            }
-                        }}
                     >
                         {!selectedClientId && <Tab label="Clientes" />}
                         {!selectedClientId && <Tab icon={<SettingsIcon sx={{ mr: 1 }} />} label="Administrativa" />}
@@ -978,7 +973,7 @@ export default function AdminDashboard() {
                                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                                         Configura los parámetros generales de la aplicación que se mostrarán en todas las páginas.
                                     </Typography>
-                                    <Typography variant="body2" sx={{ mb: 2 }}>
+                                    <Typography component="div" variant="body2" sx={{ mb: 2 }}>
                                         <strong>Texto actual del pie de página:</strong>
                                         <br />
                                         <Box component="pre" sx={{ backgroundColor: '#f5f5f5', p: 1, borderRadius: 1, fontSize: '0.875rem', whiteSpace: 'pre-line' }}>

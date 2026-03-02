@@ -1,6 +1,6 @@
 // public/sw.js
 // IMPORTANTE: CAMBIAR A V+1 EN PUBLIC
-const CACHE_NAME = 'erick-go-cache-v20';
+const CACHE_NAME = 'erick-go-cache-v21';
 
 const urlsToCache = [
   '/',
@@ -9,7 +9,7 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  console.log('[SW] Instalando Service Worker v20...');
+  console.log('[SW] Instalando Service Worker v21...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -27,7 +27,7 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  console.log('[SW] Activando Service Worker v20...');
+  console.log('[SW] Activando Service Worker v21...');
   
   event.waitUntil(
     // Borra TODAS las cachés antiguas (v7, v6, v5...)
@@ -90,7 +90,7 @@ self.addEventListener('push', event => {
     title: 'Erick Go PWA',
     body: 'Tienes una nueva notificación.',
     icon: '/erick-go-logo.png',
-    badge: '/erick-go-logo.png',
+    badge: '/icons/badge-icon.png', // <--- CORRECCIÓN: BADGE POR DEFECTO
     data: {
       url: '/login',
       primaryKey: 1
@@ -166,6 +166,7 @@ self.addEventListener('notificationclick', event => {
             return self.registration.showNotification('¡Entendido!', {
                 body: 'No recibirás más recordatorios de transporte hoy.',
                 icon: '/erick-go-logo.png',
+                badge: '/icons/badge-icon.png', // <--- CORRECCIÓN: BADGE EN CONFIRMACIÓN
                 tag: 'opt-out-confirmation'
             });
         })
